@@ -1,0 +1,10 @@
+# Secretos y datos personales: nunca se suben a GitHub
+.env
+datos/
+*.db
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/

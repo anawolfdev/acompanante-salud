@@ -1,0 +1,8 @@
+[project]
+name = "acompanante-salud"
+version = "0.1.0"
+description = "Agenda de citas médicas y recordatorios accesibles"
+requires-python = ">=3.10"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
