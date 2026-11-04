@@ -105,3 +105,7 @@ docs/               hoja de ruta
 - **Etapa 3:** red de personas voluntarias que acompañan a ir al médico, por videollamada o en persona.
 
 Más detalle en `docs/hoja-de-ruta.md`.
+
+## Responsable
+
+Ana (anawolfdev)
