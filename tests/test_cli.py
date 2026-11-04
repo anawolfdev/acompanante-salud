@@ -1,4 +1,9 @@
+from datetime import datetime
+
+from acompanante import db
 from acompanante.cli import main
+from acompanante.modelos import Cita
+from acompanante.notificador import ErrorDeEnvio
 
 
 def test_flujo_completo_en_consola(cfg, capsys):
@@ -88,3 +93,98 @@ def test_probar_telegram_sin_chat_avisa(cfg, capsys):
     salida = capsys.readouterr().out
     assert "Error: Falta TELEGRAM_TOKEN o TELEGRAM_CHAT_ID" in salida
     assert ".env" in salida
+
+
+def guardar_analitica(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_cita(
+        con,
+        Cita(titulo="Analítica", tipo="analitica", fecha_hora=datetime(2026, 11, 12, 8, 30)),
+    )
+    con.close()
+
+
+def test_vigilar_manda_los_avisos_y_no_repite(cfg, capsys, monkeypatch):
+    guardar_analitica(cfg)
+    momentos = iter([datetime(2026, 11, 10, 10, 0), datetime(2026, 11, 10, 10, 5)])
+    monkeypatch.setattr("acompanante.cli.ahora_local", lambda _cfg: next(momentos))
+
+    enviados = []
+
+    class Buzon:
+        def enviar(self, texto):
+            enviados.append(texto)
+
+    monkeypatch.setattr("acompanante.cli.crear_notificador", lambda _cfg: Buzon())
+
+    esperas = []
+
+    def esperar_falsa(segundos):
+        esperas.append(segundos)
+        if len(esperas) == 2:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr("acompanante.cli.esperar", esperar_falsa)
+
+    assert main(["vigilar"], cfg) == 0
+
+    salida = capsys.readouterr().out
+    assert "Vigilando tus citas. Para parar, pulsa Control + C" in salida
+    assert len(enviados) == 1
+    assert "Avisos enviados: 1" in salida
+    assert "Vigilancia parada. Hasta luego." in salida
+    assert esperas == [300, 300]
+
+
+def test_vigilar_sigue_si_telegram_falla(cfg, capsys, monkeypatch):
+    guardar_analitica(cfg)
+    momentos = iter([datetime(2026, 11, 10, 10, 0), datetime(2026, 11, 10, 10, 5)])
+    monkeypatch.setattr("acompanante.cli.ahora_local", lambda _cfg: next(momentos))
+
+    intentos = []
+
+    class TelegramQueFalla:
+        def enviar(self, texto):
+            intentos.append(texto)
+            raise ErrorDeEnvio("no hay conexión con Telegram")
+
+    monkeypatch.setattr("acompanante.cli.crear_notificador", lambda _cfg: TelegramQueFalla())
+
+    esperas = []
+
+    def esperar_falsa(segundos):
+        esperas.append(segundos)
+        if len(esperas) == 2:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr("acompanante.cli.esperar", esperar_falsa)
+
+    assert main(["vigilar"], cfg) == 0
+
+    salida = capsys.readouterr().out
+    assert len(intentos) == 2
+    assert "No se han podido mandar los avisos: no hay conexión con Telegram" in salida
+    assert salida.count("Se volverá a intentar en la próxima revisión.") == 2
+    assert "Vigilancia parada. Hasta luego." in salida
+
+
+def test_vigilar_espera_los_minutos_configurados(cfg, monkeypatch):
+    cfg.minutos_entre_revisiones = 2
+    monkeypatch.setattr("acompanante.cli.ahora_local", lambda _cfg: datetime(2026, 11, 10, 10, 0))
+
+    class Buzon:
+        def enviar(self, texto):
+            pass
+
+    monkeypatch.setattr("acompanante.cli.crear_notificador", lambda _cfg: Buzon())
+
+    esperas = []
+
+    def esperar_falsa(segundos):
+        esperas.append(segundos)
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("acompanante.cli.esperar", esperar_falsa)
+
+    assert main(["vigilar"], cfg) == 0
+    assert esperas == [120]

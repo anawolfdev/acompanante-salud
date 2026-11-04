@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
@@ -82,6 +83,43 @@ def orden_avisos(args, cfg: Config) -> int:
         else:
             print(f"Avisos enviados: {len(avisos)}")
     return 0
+
+
+def esperar(segundos: float) -> None:
+    """Pausa entre revisiones. En las pruebas se cambia por una que no espera."""
+    time.sleep(segundos)
+
+
+def _revisar_avisos_una_vez(con, cfg: Config) -> int:
+    """Manda los avisos que tocan ahora. Devuelve cuántos se han mandado."""
+    ahora = ahora_local(cfg)
+    try:
+        notificador = crear_notificador(cfg)
+        avisos = enviar_avisos(con, notificador, ahora, cfg)
+    except ErrorDeEnvio as error:
+        print(f"No se han podido mandar los avisos: {error}")
+        print("Se volverá a intentar en la próxima revisión.")
+        return 0
+    if avisos:
+        print(f"Avisos enviados: {len(avisos)}")
+    return len(avisos)
+
+
+def orden_vigilar(args, cfg: Config) -> int:
+    """Revisa las citas cada pocos minutos hasta que se pulsa Control + C."""
+    print("Vigilando tus citas. Para parar, pulsa Control + C")
+    try:
+        while True:
+            con = db.conectar(cfg.ruta_bd)
+            try:
+                _revisar_avisos_una_vez(con, cfg)
+            finally:
+                con.close()
+            esperar(cfg.minutos_entre_revisiones * 60)
+    except KeyboardInterrupt:
+        print()
+        print("Vigilancia parada. Hasta luego.")
+        return 0
 
 
 def orden_demo(args, cfg: Config) -> int:
@@ -190,6 +228,9 @@ def crear_parser() -> argparse.ArgumentParser:
     s.add_argument("--ahora", help="Hacer como si fuera esta fecha y hora, por ejemplo: '10/11/2026 10:00'")
     s.add_argument("--simular", action="store_true", help="Solo enseña los avisos, sin mandarlos ni apuntarlos")
     s.set_defaults(funcion=orden_avisos)
+
+    s = sub.add_parser("vigilar", help="Revisa las citas cada pocos minutos hasta que pares con Control + C.")
+    s.set_defaults(funcion=orden_vigilar)
 
     s = sub.add_parser("demo", help="Apunta citas de ejemplo y enseña cómo serían los avisos.")
     s.set_defaults(funcion=orden_demo)

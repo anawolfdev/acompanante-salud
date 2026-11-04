@@ -35,6 +35,7 @@ class Config:
     dias_antes: int = 2
     hora_aviso_previo: str = "10:00"
     hora_aviso_dia: str = "07:30"
+    minutos_entre_revisiones: int = 5
     canal: str = "consola"
     telegram_token: str = ""
     telegram_chat_id: str = ""
@@ -53,6 +54,7 @@ def leer_config(entorno: dict[str, str] | None = None) -> Config:
         dias_antes=int(e.get("DIAS_ANTES", "2")),
         hora_aviso_previo=e.get("HORA_AVISO_PREVIO", "10:00"),
         hora_aviso_dia=e.get("HORA_AVISO_DIA", "07:30"),
+        minutos_entre_revisiones=int(e.get("MINUTOS_ENTRE_REVISIONES", "5")),
         canal=e.get("CANAL", "consola").lower(),
         telegram_token=e.get("TELEGRAM_TOKEN", ""),
         telegram_chat_id=e.get("TELEGRAM_CHAT_ID", ""),
