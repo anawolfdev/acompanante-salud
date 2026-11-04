@@ -5,7 +5,13 @@ import urllib.parse
 import pytest
 
 from acompanante.config import Config
-from acompanante.notificador import ErrorDeEnvio, NotificadorConsola, NotificadorTelegram, crear_notificador
+from acompanante.notificador import (
+    ErrorDeEnvio,
+    NotificadorConsola,
+    NotificadorTelegram,
+    consultar_chats,
+    crear_notificador,
+)
 
 
 class RespuestaFalsa(io.BytesIO):
@@ -42,6 +48,38 @@ def test_telegram_error_se_explica():
 def test_telegram_sin_token_avisa():
     with pytest.raises(ErrorDeEnvio, match="ACS-002"):
         NotificadorTelegram("", "")
+
+
+def test_consultar_chats_devuelve_el_numero_sin_repetir():
+    peticiones = []
+    respuesta = {
+        "ok": True,
+        "result": [
+            {"update_id": 1, "message": {"chat": {"id": 999, "first_name": "Ana", "last_name": "Pérez"}}},
+            {"update_id": 2, "message": {"chat": {"id": 999, "first_name": "Ana", "last_name": "Pérez"}}},
+            {"update_id": 3, "message": {"chat": {"id": 1000, "first_name": "Luis"}}},
+        ],
+    }
+    chats = consultar_chats("123:ABC", abrir=abridor(respuesta, peticiones))
+    assert chats == [("999", "Ana Pérez"), ("1000", "Luis")]
+    assert peticiones[0].full_url == "https://api.telegram.org/bot123:ABC/getUpdates"
+    assert peticiones[0].get_method() == "GET"
+
+
+def test_consultar_chats_sin_mensajes():
+    chats = consultar_chats("123:ABC", abrir=abridor({"ok": True, "result": []}, []))
+    assert chats == []
+
+
+def test_consultar_chats_error_se_explica():
+    n = abridor({"ok": False, "description": "Unauthorized"}, [])
+    with pytest.raises(ErrorDeEnvio, match="Unauthorized"):
+        consultar_chats("123:ABC", abrir=n)
+
+
+def test_consultar_chats_sin_token_avisa():
+    with pytest.raises(ErrorDeEnvio, match="TELEGRAM_TOKEN"):
+        consultar_chats("")
 
 
 def test_crear_notificador_por_defecto_es_consola():

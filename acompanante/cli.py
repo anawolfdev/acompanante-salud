@@ -9,7 +9,13 @@ from zoneinfo import ZoneInfo
 from acompanante import db
 from acompanante.config import Config, cargar_env, leer_config
 from acompanante.modelos import TIPOS, Cita
-from acompanante.notificador import ErrorDeEnvio, NotificadorConsola, crear_notificador
+from acompanante.notificador import (
+    ErrorDeEnvio,
+    NotificadorConsola,
+    NotificadorTelegram,
+    consultar_chats,
+    crear_notificador,
+)
 from acompanante.recordatorios import enviar_avisos, momentos_de_aviso, texto_aviso
 from acompanante.textos import fecha_larga, hora_texto, parsear_fecha, parsear_fecha_hora, parsear_hora
 
@@ -121,12 +127,50 @@ def orden_demo(args, cfg: Config) -> int:
     return 0
 
 
+TEXTO_DE_SALUDO = "Hola, soy tu Acompañante de salud. Los avisos te llegarán por aquí."
+
+
+def orden_mi_chat(args, cfg: Config) -> int:
+    """Pregunta a Telegram y enseña el número de chat de quien escribió al bot."""
+    chats = consultar_chats(cfg.telegram_token)
+    if not chats:
+        print("Todavía no le has escrito a tu bot.")
+        print('Abre Telegram, busca tu bot y escríbele "hola".')
+        print("Después vuelve a ejecutar esta orden.")
+        return 0
+    if len(chats) == 1:
+        numero, nombre = chats[0]
+        if nombre:
+            print(f"Te ha escrito {nombre}.")
+        print(f"Tu número de chat es: {numero}")
+    else:
+        print("Estas personas le han escrito a tu bot:")
+        for posicion, (numero, nombre) in enumerate(chats, start=1):
+            print(f"{posicion}. {nombre or 'Sin nombre'}: {numero}")
+        print("Usa el número de la persona que quieras.")
+    print("Copia el número en el archivo .env, en TELEGRAM_CHAT_ID.")
+    return 0
+
+
+def orden_probar_telegram(args, cfg: Config) -> int:
+    """Manda el mensaje de saludo al móvil con Telegram."""
+    NotificadorTelegram(cfg.telegram_token, cfg.telegram_chat_id).enviar(TEXTO_DE_SALUDO)
+    print("Mensaje enviado. Mira tu móvil.")
+    return 0
+
+
 def crear_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="python -m acompanante", description="Acompañante de salud: citas y recordatorios.")
     sub = p.add_subparsers(dest="orden", required=True, metavar="orden")
 
     s = sub.add_parser("iniciar", help="Crea la base de datos.")
     s.set_defaults(funcion=orden_iniciar)
+
+    s = sub.add_parser("mi-chat", help="Averigua tu número de chat de Telegram.")
+    s.set_defaults(funcion=orden_mi_chat)
+
+    s = sub.add_parser("probar-telegram", help="Manda un mensaje de prueba a tu móvil por Telegram.")
+    s.set_defaults(funcion=orden_probar_telegram)
 
     s = sub.add_parser("nueva-cita", help="Apunta una cita, analítica, vacuna o prueba.")
     s.add_argument("--titulo", required=True, help="Por ejemplo: Analítica de sangre")
