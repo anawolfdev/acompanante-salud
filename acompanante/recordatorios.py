@@ -2,11 +2,14 @@
 
 Reglas de la etapa 1:
 - Aviso "previo": DIAS_ANTES días antes de la cita, a la HORA_AVISO_PREVIO.
+- Aviso "vispera": la noche anterior a la HORA_AVISO_VISPERA, solo si la
+  preparación incluye la palabra "ayunas".
 - Aviso "dia": el mismo día a la HORA_AVISO_DIA, o una hora antes de la cita
   si la cita es muy temprano (lo que ocurra antes).
 - Nunca se avisa de una cita que ya ha pasado.
-- Si los dos avisos tocan a la vez (por ejemplo, la cita se apuntó tarde),
-  solo se manda el del día.
+- Si varios avisos tocan a la vez (por ejemplo, la cita se apuntó tarde),
+  solo se manda el más importante: primero el del día, luego el de la víspera
+  y por último el previo.
 """
 
 from __future__ import annotations
@@ -25,22 +28,33 @@ from acompanante.textos import cuando, fecha_larga, hora_texto, parsear_hora
 @dataclass
 class Aviso:
     cita: Cita
-    tipo: str  # 'previo' o 'dia'
+    tipo: str  # 'previo', 'vispera' o 'dia'
     momento: datetime
     texto: str
     cubre: list[str] = field(default_factory=list)  # tipos que quedan atendidos con este envío
 
 
+def necesita_ayunas(cita: Cita) -> bool:
+    """Mira si algún paso de preparación menciona el ayuno."""
+    return any("ayunas" in paso.lower() for paso in cita.preparacion)
+
+
 def momentos_de_aviso(cita: Cita, cfg: Config) -> dict[str, datetime]:
     dia_previo = cita.fecha_hora.date() - timedelta(days=cfg.dias_antes)
     previo = datetime.combine(dia_previo, parsear_hora(cfg.hora_aviso_previo))
+    momentos = {"previo": previo}
+    if necesita_ayunas(cita):
+        dia_vispera = cita.fecha_hora.date() - timedelta(days=1)
+        momentos["vispera"] = datetime.combine(dia_vispera, parsear_hora(cfg.hora_aviso_vispera))
     mismo_dia = datetime.combine(cita.fecha_hora.date(), parsear_hora(cfg.hora_aviso_dia))
-    dia = min(mismo_dia, cita.fecha_hora - timedelta(hours=1))
-    return {"previo": previo, "dia": dia}
+    momentos["dia"] = min(mismo_dia, cita.fecha_hora - timedelta(hours=1))
+    return momentos
 
 
-def texto_aviso(cita: Cita, ahora: datetime) -> str:
+def texto_aviso(cita: Cita, ahora: datetime, tipo: str = "") -> str:
     """Mensaje claro, sin emojis ni abreviaturas, pensado para lectores de pantalla."""
+    if not tipo and necesita_ayunas(cita) and (cita.fecha_hora.date() - ahora.date()).days == 1:
+        tipo = "vispera"
     que = cita.titulo or TIPOS[cita.tipo]
     relativo = cuando(cita.fecha_hora.date(), ahora.date())
     lineas = [
@@ -48,10 +62,12 @@ def texto_aviso(cita: Cita, ahora: datetime) -> str:
         f"{relativo.capitalize()}, {fecha_larga(cita.fecha_hora)}, a las "
         f"{hora_texto(cita.fecha_hora)}: {que}.",
     ]
+    if tipo == "vispera":
+        lineas.append("Desde ahora, no comas nada.")
     if cita.lugar:
         lineas.append(f"Dónde: {cita.lugar}.")
     if cita.preparacion:
-        lineas.append("Para prepararte:")
+        lineas.append("Deja preparado:" if tipo == "vispera" else "Para prepararte:")
         for numero, paso in enumerate(cita.preparacion, start=1):
             paso = paso.strip().rstrip(".")
             lineas.append(f"{numero}. {paso}.")
@@ -81,9 +97,20 @@ def avisos_pendientes(
         ]
         if not tocan:
             continue
-        tipo = "dia" if "dia" in tocan else "previo"
+        if "dia" in tocan:
+            tipo = "dia"
+        elif "vispera" in tocan:
+            tipo = "vispera"
+        else:
+            tipo = "previo"
         pendientes.append(
-            Aviso(cita=cita, tipo=tipo, momento=momentos[tipo], texto=texto_aviso(cita, ahora), cubre=tocan)
+            Aviso(
+                cita=cita,
+                tipo=tipo,
+                momento=momentos[tipo],
+                texto=texto_aviso(cita, ahora, tipo),
+                cubre=tocan,
+            )
         )
     return pendientes
 
