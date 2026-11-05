@@ -292,3 +292,58 @@ def test_cambiar_cita_sin_opciones_avisa(cfg, capsys):
 def test_cambiar_cita_con_numero_que_no_existe(cfg, capsys):
     assert main(["cambiar-cita", "7", "--hora", "9:00"], cfg) == 1
     assert "No hay ninguna cita con el número 7" in capsys.readouterr().out
+
+
+def test_analitica_sin_preparar_usa_la_lista_sugerida(cfg, capsys):
+    assert main([
+        "nueva-cita", "--titulo", "Analítica", "--tipo", "analitica",
+        "--fecha", "12/11/2099", "--hora", "8:30",
+    ], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "1. Ve en ayunas si te lo han indicado." in salida
+    assert "2. Lleva la muestra de orina si te la han pedido." in salida
+    assert "3. Lleva el volante del médico." in salida
+    assert "4. Lleva la tarjeta sanitaria." in salida
+
+
+def test_preparar_propio_manda_sobre_la_sugerencia(cfg, capsys):
+    assert main([
+        "nueva-cita", "--titulo", "Analítica", "--tipo", "analitica",
+        "--fecha", "12/11/2099", "--hora", "8:30",
+        "--preparar", "Lleva mi carpeta azul",
+    ], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "1. Lleva mi carpeta azul." in salida
+    assert "Ve en ayunas" not in salida
+
+
+def test_sin_sugerencias_no_anade_preparacion(cfg, capsys):
+    assert main([
+        "nueva-cita", "--titulo", "Analítica", "--tipo", "analitica",
+        "--fecha", "12/11/2099", "--hora", "8:30", "--sin-sugerencias",
+    ], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "No hay nada apuntado que preparar. Lleva tu tarjeta sanitaria." in salida
+    assert "Ve en ayunas" not in salida
+
+
+def test_vacuna_sin_preparar_usa_su_lista_sugerida(cfg, capsys):
+    assert main([
+        "nueva-cita", "--titulo", "Vacuna de la gripe", "--tipo", "vacuna",
+        "--fecha", "12/11/2099", "--hora", "8:30",
+    ], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "1. Lleva la tarjeta sanitaria." in salida
+    assert "2. Lleva la cartilla de vacunación si la tienes." in salida
