@@ -29,6 +29,37 @@ def test_listar_desde_oculta_las_pasadas(cfg):
     assert titulos == ["Nueva"]
 
 
+def test_borrar_cita_la_quita_de_la_lista(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    cid = db.guardar_cita(con, Cita(titulo="X", fecha_hora=datetime(2026, 12, 1, 9, 0)))
+    db.borrar_cita(con, cid)
+    assert db.listar_citas(con) == []
+
+
+def test_obtener_cita_avisa_si_no_existe(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    try:
+        db.obtener_cita(con, 7)
+    except ValueError as error:
+        assert str(error) == "No hay ninguna cita con el número 7"
+    else:
+        assert False, "Tenía que avisar de que la cita no existe"
+
+
+def test_actualizar_cita_y_olvidar_los_avisos(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    cid = db.guardar_cita(con, Cita(titulo="X", fecha_hora=datetime(2026, 12, 1, 9, 0)))
+    db.marcar_aviso_enviado(con, cid, "previo", datetime(2026, 11, 29, 10, 0))
+
+    cita = db.obtener_cita(con, cid)
+    cita.fecha_hora = datetime(2026, 12, 2, 9, 30)
+    db.actualizar_cita(con, cita)
+    db.borrar_avisos_de_cita(con, cid)
+
+    assert db.obtener_cita(con, cid).fecha_hora == datetime(2026, 12, 2, 9, 30)
+    assert not db.aviso_enviado(con, cid, "previo")
+
+
 def test_aviso_enviado_se_recuerda(cfg):
     con = db.conectar(cfg.ruta_bd)
     cid = db.guardar_cita(con, Cita(titulo="X", fecha_hora=datetime(2026, 12, 1, 9, 0)))

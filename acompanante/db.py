@@ -75,6 +75,41 @@ def guardar_cita(con: sqlite3.Connection, cita: Cita) -> int:
     return cita.id
 
 
+def obtener_cita(con: sqlite3.Connection, cita_id: int) -> Cita:
+    fila = con.execute("SELECT * FROM citas WHERE id = ?", (cita_id,)).fetchone()
+    if fila is None:
+        raise ValueError(f"No hay ninguna cita con el número {cita_id}")
+    return _fila_a_cita(fila)
+
+
+def actualizar_cita(con: sqlite3.Connection, cita: Cita) -> None:
+    con.execute(
+        "UPDATE citas SET tipo = ?, titulo = ?, fecha_hora = ?, lugar = ?, preparacion = ?, notas = ?"
+        " WHERE id = ?",
+        (
+            cita.tipo,
+            cita.titulo,
+            cita.fecha_hora.strftime(FORMATO),
+            cita.lugar,
+            json.dumps(cita.preparacion, ensure_ascii=False),
+            cita.notas,
+            cita.id,
+        ),
+    )
+    con.commit()
+
+
+def borrar_cita(con: sqlite3.Connection, cita_id: int) -> None:
+    con.execute("DELETE FROM citas WHERE id = ?", (cita_id,))
+    con.commit()
+
+
+def borrar_avisos_de_cita(con: sqlite3.Connection, cita_id: int) -> None:
+    """Olvida los avisos ya enviados, para que vuelvan a salir."""
+    con.execute("DELETE FROM avisos_enviados WHERE cita_id = ?", (cita_id,))
+    con.commit()
+
+
 def listar_citas(con: sqlite3.Connection, desde: datetime | None = None) -> list[Cita]:
     """Citas ordenadas por fecha. Con 'desde', solo las que aún no han pasado."""
     if desde is None:

@@ -54,6 +54,56 @@ def orden_nueva_cita(args, cfg: Config) -> int:
     return 0
 
 
+def orden_borrar_cita(args, cfg: Config) -> int:
+    con = db.conectar(cfg.ruta_bd)
+    cita = db.obtener_cita(con, args.id)
+    print("Vas a borrar esta cita:")
+    print(_linea_cita(cita))
+    print("¿Seguro que quieres borrar esta cita? (s/n)")
+    respuesta = input()
+    if respuesta.strip().lower() not in ("s", "si", "sí"):
+        print("No se ha borrado nada.")
+        return 0
+    db.borrar_cita(con, cita.id)
+    print("Cita borrada.")
+    return 0
+
+
+def orden_cambiar_cita(args, cfg: Config) -> int:
+    con = db.conectar(cfg.ruta_bd)
+    cita = db.obtener_cita(con, args.id)
+
+    hay_cambios = any(
+        valor is not None
+        for valor in (args.titulo, args.fecha, args.hora, args.tipo, args.lugar, args.preparar, args.notas)
+    )
+    if not hay_cambios:
+        print("No has indicado ningún cambio.")
+        return 0
+
+    fecha_hora = cita.fecha_hora
+    if args.fecha is not None or args.hora is not None:
+        fecha = parsear_fecha(args.fecha) if args.fecha is not None else cita.fecha_hora.date()
+        hora = parsear_hora(args.hora) if args.hora is not None else cita.fecha_hora.time()
+        fecha_hora = datetime.combine(fecha, hora)
+
+    nueva = Cita(
+        titulo=args.titulo if args.titulo is not None else cita.titulo,
+        fecha_hora=fecha_hora,
+        tipo=args.tipo if args.tipo is not None else cita.tipo,
+        lugar=args.lugar if args.lugar is not None else cita.lugar,
+        preparacion=args.preparar if args.preparar is not None else cita.preparacion,
+        notas=args.notas if args.notas is not None else cita.notas,
+        id=cita.id,
+    )
+    if nueva.fecha_hora != cita.fecha_hora:
+        db.borrar_avisos_de_cita(con, cita.id)
+    db.actualizar_cita(con, nueva)
+    print("Cita cambiada:")
+    print(_linea_cita(nueva))
+    return 0
+
+
 def orden_citas(args, cfg: Config) -> int:
     con = db.conectar(cfg.ruta_bd)
     desde = None if args.todas else ahora_local(cfg)
@@ -219,6 +269,21 @@ def crear_parser() -> argparse.ArgumentParser:
     s.add_argument("--preparar", action="append", help="Algo que preparar. Se puede repetir.")
     s.add_argument("--notas", help="Cualquier nota extra")
     s.set_defaults(funcion=orden_nueva_cita)
+
+    s = sub.add_parser("borrar-cita", help="Borra una cita. Pide confirmación.")
+    s.add_argument("id", type=int, help="El número entre corchetes que sale en citas")
+    s.set_defaults(funcion=orden_borrar_cita)
+
+    s = sub.add_parser("cambiar-cita", help="Cambia los datos de una cita.")
+    s.add_argument("id", type=int, help="El número entre corchetes que sale en citas")
+    s.add_argument("--titulo", help="Por ejemplo: Analítica de sangre")
+    s.add_argument("--fecha", help="Por ejemplo: 12/11/2026")
+    s.add_argument("--hora", help="Por ejemplo: 8:30")
+    s.add_argument("--tipo", choices=list(TIPOS), help="Tipo de cita")
+    s.add_argument("--lugar", help="Por ejemplo: Centro de salud de Coia")
+    s.add_argument("--preparar", action="append", help="Algo que preparar. Se puede repetir.")
+    s.add_argument("--notas", help="Cualquier nota extra")
+    s.set_defaults(funcion=orden_cambiar_cita)
 
     s = sub.add_parser("citas", help="Muestra las próximas citas.")
     s.add_argument("--todas", action="store_true", help="Incluye también las que ya pasaron")
