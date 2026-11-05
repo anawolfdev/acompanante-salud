@@ -188,3 +188,107 @@ def test_vigilar_espera_los_minutos_configurados(cfg, monkeypatch):
 
     assert main(["vigilar"], cfg) == 0
     assert esperas == [120]
+
+
+def guardar_cita_de_prueba(cfg, **cambios):
+    datos = dict(
+        titulo="Analítica",
+        tipo="analitica",
+        fecha_hora=datetime(2099, 11, 12, 8, 30),
+        lugar="Centro de salud",
+        preparacion=["Ve en ayunas"],
+    )
+    datos.update(cambios)
+    con = db.conectar(cfg.ruta_bd)
+    cita = Cita(**datos)
+    db.guardar_cita(con, cita)
+    con.close()
+    return cita.id
+
+
+def test_borrar_cita_pide_confirmacion_y_la_quita(cfg, capsys, monkeypatch):
+    cid = guardar_cita_de_prueba(cfg)
+    monkeypatch.setattr("builtins.input", lambda _texto="": "s")
+
+    assert main(["borrar-cita", str(cid)], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "¿Seguro que quieres borrar esta cita? (s/n)" in salida
+    assert "Cita borrada." in salida
+
+    assert main(["citas"], cfg) == 0
+    assert "No tienes citas apuntadas." in capsys.readouterr().out
+
+
+def test_borrar_cita_si_se_dice_que_no_no_borra(cfg, capsys, monkeypatch):
+    cid = guardar_cita_de_prueba(cfg)
+    monkeypatch.setattr("builtins.input", lambda _texto="": "n")
+
+    assert main(["borrar-cita", str(cid)], cfg) == 0
+    assert "No se ha borrado nada." in capsys.readouterr().out
+
+    con = db.conectar(cfg.ruta_bd)
+    assert len(db.listar_citas(con)) == 1
+    con.close()
+
+
+def test_borrar_cita_con_numero_que_no_existe(cfg, capsys):
+    assert main(["borrar-cita", "7"], cfg) == 1
+    assert "No hay ninguna cita con el número 7" in capsys.readouterr().out
+
+
+def test_cambiar_cita_solo_cambia_lo_indicado(cfg, capsys):
+    cid = guardar_cita_de_prueba(cfg)
+
+    assert main(["cambiar-cita", str(cid), "--hora", "9:45"], cfg) == 0
+    assert "jueves 12 de noviembre a las 9:45: Analítica (Centro de salud)" in capsys.readouterr().out
+
+    con = db.conectar(cfg.ruta_bd)
+    cita = db.obtener_cita(con, cid)
+    con.close()
+    assert cita.fecha_hora == datetime(2099, 11, 12, 9, 45)
+    assert cita.tipo == "analitica"
+    assert cita.preparacion == ["Ve en ayunas"]
+
+
+def test_cambiar_la_hora_hace_que_el_aviso_vuelva_a_salir(cfg, capsys):
+    cid = guardar_cita_de_prueba(cfg)
+
+    assert main(["avisos", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    assert "Avisos enviados: 1" in capsys.readouterr().out
+
+    assert main(["avisos", "--ahora", "10/11/2099 10:05"], cfg) == 0
+    assert "no toca ningún aviso" in capsys.readouterr().out
+
+    assert main(["cambiar-cita", str(cid), "--hora", "9:30"], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "10/11/2099 10:06"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "a las 9:30" in salida
+    assert "Avisos que tocarían" in salida
+
+
+def test_cambiar_la_fecha_hace_que_el_aviso_salga_con_el_dia_nuevo(cfg, capsys):
+    cid = guardar_cita_de_prueba(cfg)
+
+    assert main(["avisos", "--ahora", "10/11/2099 10:00"], cfg) == 0
+    assert "Avisos enviados: 1" in capsys.readouterr().out
+
+    assert main(["cambiar-cita", str(cid), "--fecha", "13/11/2099"], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "11/11/2099 10:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "viernes 13 de noviembre" in salida
+    assert "Avisos que tocarían" in salida
+
+
+def test_cambiar_cita_sin_opciones_avisa(cfg, capsys):
+    cid = guardar_cita_de_prueba(cfg)
+    assert main(["cambiar-cita", str(cid)], cfg) == 0
+    assert "No has indicado ningún cambio." in capsys.readouterr().out
+
+
+def test_cambiar_cita_con_numero_que_no_existe(cfg, capsys):
+    assert main(["cambiar-cita", "7", "--hora", "9:00"], cfg) == 1
+    assert "No hay ninguna cita con el número 7" in capsys.readouterr().out
