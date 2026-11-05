@@ -17,6 +17,7 @@ from acompanante.notificador import (
     consultar_chats,
     crear_notificador,
 )
+from acompanante.plantillas import preparacion_sugerida
 from acompanante.recordatorios import enviar_avisos, momentos_de_aviso, texto_aviso
 from acompanante.textos import fecha_larga, hora_texto, parsear_fecha, parsear_fecha_hora, parsear_hora
 
@@ -39,12 +40,15 @@ def orden_iniciar(args, cfg: Config) -> int:
 
 
 def orden_nueva_cita(args, cfg: Config) -> int:
+    preparacion = args.preparar
+    if not preparacion:
+        preparacion = [] if args.sin_sugerencias else preparacion_sugerida(args.tipo)
     cita = Cita(
         titulo=args.titulo,
         fecha_hora=datetime.combine(parsear_fecha(args.fecha), parsear_hora(args.hora)),
         tipo=args.tipo,
         lugar=args.lugar or "",
-        preparacion=args.preparar or [],
+        preparacion=preparacion,
         notas=args.notas or "",
     )
     con = db.conectar(cfg.ruta_bd)
@@ -267,6 +271,11 @@ def crear_parser() -> argparse.ArgumentParser:
     s.add_argument("--tipo", default="cita", choices=list(TIPOS), help="Tipo de cita (por defecto: cita)")
     s.add_argument("--lugar", help="Por ejemplo: Centro de salud de Coia")
     s.add_argument("--preparar", action="append", help="Algo que preparar. Se puede repetir.")
+    s.add_argument(
+        "--sin-sugerencias",
+        action="store_true",
+        help="No añadir la lista de preparación sugerida del tipo de cita.",
+    )
     s.add_argument("--notas", help="Cualquier nota extra")
     s.set_defaults(funcion=orden_nueva_cita)
 
