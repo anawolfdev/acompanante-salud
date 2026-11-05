@@ -34,6 +34,7 @@ class Config:
     zona_horaria: str = "Europe/Madrid"
     dias_antes: int = 2
     hora_aviso_previo: str = "10:00"
+    hora_aviso_vispera: str = "21:00"
     hora_aviso_dia: str = "07:30"
     minutos_entre_revisiones: int = 5
     canal: str = "consola"
@@ -53,6 +54,7 @@ def leer_config(entorno: dict[str, str] | None = None) -> Config:
         zona_horaria=e.get("ZONA_HORARIA", "Europe/Madrid"),
         dias_antes=int(e.get("DIAS_ANTES", "2")),
         hora_aviso_previo=e.get("HORA_AVISO_PREVIO", "10:00"),
+        hora_aviso_vispera=e.get("HORA_AVISO_VISPERA", "21:00"),
         hora_aviso_dia=e.get("HORA_AVISO_DIA", "07:30"),
         minutos_entre_revisiones=int(e.get("MINUTOS_ENTRE_REVISIONES", "5")),
         canal=e.get("CANAL", "consola").lower(),

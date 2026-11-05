@@ -212,10 +212,14 @@ def orden_demo(args, cfg: Config) -> int:
         print(f"Apuntada: {_linea_cita(cita)}")
     primera = ejemplos[0]
     print()
+    nombres = {
+        "previo": f"{cfg.dias_antes} días antes",
+        "vispera": "la noche antes",
+        "dia": "el mismo día",
+    }
     for tipo, momento in momentos_de_aviso(primera, cfg).items():
-        nombre = f"{cfg.dias_antes} días antes" if tipo == "previo" else "el mismo día"
-        print(f"Así te llegará el aviso {nombre} ({fecha_larga(momento)} a las {hora_texto(momento)}):")
-        NotificadorConsola().enviar(texto_aviso(primera, momento))
+        print(f"Así te llegará el aviso {nombres[tipo]} ({fecha_larga(momento)} a las {hora_texto(momento)}):")
+        NotificadorConsola().enviar(texto_aviso(primera, momento, tipo))
     return 0
 
 
