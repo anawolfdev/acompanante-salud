@@ -486,3 +486,89 @@ def test_tension_con_numero_que_no_es_positivo_avisa(cfg, capsys):
     codigo = main(["tension", "0", "85"], cfg)
     assert codigo == 1
     assert "La tensión de alta tiene que ser un número mayor que cero" in capsys.readouterr().out
+
+
+def test_vigilar_atiende_los_mensajes_del_bot(cfg, monkeypatch):
+    cfg.telegram_token = "123:ABC"
+    cfg.telegram_chat_id = "999"
+
+    class Buzon:
+        def enviar(self, texto):
+            pass
+
+    monkeypatch.setattr("acompanante.cli.crear_notificador", lambda _cfg: Buzon())
+
+    offsets = []
+
+    def atender_falsa(con, _cfg, offset=None):
+        offsets.append(offset)
+        return 7 if offset is None else 8
+
+    monkeypatch.setattr("acompanante.cli.atender_mensajes", atender_falsa)
+
+    esperas = []
+
+    def esperar_falsa(segundos):
+        esperas.append(segundos)
+        if len(esperas) == 2:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr("acompanante.cli.esperar", esperar_falsa)
+
+    assert main(["vigilar"], cfg) == 0
+    assert offsets == [None, 7]
+    assert esperas == [1, 1]
+
+
+def test_vigilar_con_bot_revisa_avisos_cada_minuto(cfg, monkeypatch):
+    cfg.telegram_token = "123:ABC"
+    cfg.telegram_chat_id = "999"
+
+    class Buzon:
+        def enviar(self, texto):
+            pass
+
+    monkeypatch.setattr("acompanante.cli.crear_notificador", lambda _cfg: Buzon())
+
+    revisiones = []
+    monkeypatch.setattr(
+        "acompanante.cli._revisar_avisos_una_vez",
+        lambda con, _cfg: revisiones.append(1),
+    )
+    monkeypatch.setattr(
+        "acompanante.cli.atender_mensajes",
+        lambda con, _cfg, offset=None: offset,
+    )
+
+    momentos = iter([0.0, 30.0, 61.0])
+    monkeypatch.setattr("acompanante.cli.time.monotonic", lambda: next(momentos))
+
+    esperas = []
+
+    def esperar_falsa(segundos):
+        esperas.append(segundos)
+        if len(esperas) == 3:
+            raise KeyboardInterrupt
+
+    monkeypatch.setattr("acompanante.cli.esperar", esperar_falsa)
+
+    assert main(["vigilar"], cfg) == 0
+    assert len(revisiones) == 2
+    assert esperas == [1, 1, 1]
+
+
+def test_citas_ordena_por_fecha_y_hora(cfg, capsys, monkeypatch):
+    tarde = Cita(titulo="Tarde", fecha_hora=datetime(2026, 11, 12, 17, 0))
+    temprano = Cita(titulo="Temprano", fecha_hora=datetime(2026, 11, 12, 8, 30))
+    otro_dia = Cita(titulo="Otro día", fecha_hora=datetime(2026, 11, 10, 9, 0))
+    monkeypatch.setattr(
+        "acompanante.cli.db.listar_citas",
+        lambda con, desde=None: [tarde, otro_dia, temprano],
+    )
+
+    assert main(["citas", "--todas"], cfg) == 0
+    salida = capsys.readouterr().out
+    lineas = [linea for linea in salida.splitlines() if linea.startswith("[")]
+    assert "Otro día" in lineas[0]
+    assert "Temprano" in lineas[1]
+    assert "Tarde" in lineas[2]

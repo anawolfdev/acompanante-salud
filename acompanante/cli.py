@@ -8,6 +8,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from acompanante import db
+from acompanante.bot import atender_mensajes
 from acompanante.config import Config, cargar_env, leer_config
 from acompanante.modelos import TIPOS, Cita, Tarea, Tension
 from acompanante.notificador import (
@@ -150,7 +151,7 @@ def orden_cambiar_cita(args, cfg: Config) -> int:
 def orden_citas(args, cfg: Config) -> int:
     con = db.conectar(cfg.ruta_bd)
     desde = None if args.todas else ahora_local(cfg)
-    citas = db.listar_citas(con, desde=desde)
+    citas = sorted(db.listar_citas(con, desde=desde), key=lambda cita: cita.fecha_hora)
     if not citas:
         print("No tienes citas apuntadas.")
         return 0
@@ -269,16 +270,32 @@ def _revisar_avisos_una_vez(con, cfg: Config) -> int:
 
 
 def orden_vigilar(args, cfg: Config) -> int:
-    """Revisa las citas cada pocos minutos hasta que se pulsa Control + C."""
+    """Revisa las citas y atiende el bot hasta que se pulsa Control + C."""
     print("Vigilando tus citas. Para parar, pulsa Control + C")
+    offset = None
+    bot_activo = bool(cfg.telegram_token and cfg.telegram_chat_id)
+    ultima_revision = None
     try:
         while True:
             con = db.conectar(cfg.ruta_bd)
+            pausa = 1
             try:
-                _revisar_avisos_una_vez(con, cfg)
+                if bot_activo:
+                    ahora = time.monotonic()
+                    if ultima_revision is None or ahora - ultima_revision >= 60:
+                        _revisar_avisos_una_vez(con, cfg)
+                        ultima_revision = ahora
+                    try:
+                        offset = atender_mensajes(con, cfg, offset)
+                    except ErrorDeEnvio as error:
+                        print(f"No se han podido leer los mensajes: {error}")
+                        pausa = 5
+                else:
+                    _revisar_avisos_una_vez(con, cfg)
+                    pausa = cfg.minutos_entre_revisiones * 60
             finally:
                 con.close()
-            esperar(cfg.minutos_entre_revisiones * 60)
+            esperar(pausa)
     except KeyboardInterrupt:
         print()
         print("Vigilancia parada. Hasta luego.")

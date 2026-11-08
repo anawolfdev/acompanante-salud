@@ -89,6 +89,56 @@ def consultar_chats(token: str, abrir=None) -> list[tuple[str, str]]:
     return chats
 
 
+def leer_mensajes(token: str, offset: int | None = None, timeout: int = 30, abrir=None) -> list[dict]:
+    """Pregunta a Telegram por los mensajes nuevos que le han escrito al bot.
+
+    Devuelve una lista de diccionarios con 'update_id', 'chat_id' y 'texto'.
+    Con 'offset' se pide a Telegram que no vuelva a mandar los mensajes anteriores.
+    Con 'timeout' se usa long polling: Telegram mantiene la conexión abierta hasta
+    que llega un mensaje o pasan esos segundos.
+    """
+    if not token:
+        raise ErrorDeEnvio(
+            "Falta TELEGRAM_TOKEN en el archivo .env. "
+            "Copia el token de @BotFather y pégalo ahí. "
+            "Mira la GUIA.md (paso 0.8) y el ticket ACS-002."
+        )
+    if abrir is None:
+        abrir = urllib.request.urlopen
+    parametros = {"timeout": str(timeout)}
+    if offset is not None:
+        parametros["offset"] = str(offset)
+    url = "https://api.telegram.org/bot{token}/getUpdates?{consulta}".format(
+        token=token, consulta=urllib.parse.urlencode(parametros)
+    )
+    peticion = urllib.request.Request(url, method="GET")
+    try:
+        with abrir(peticion, timeout=timeout + 10) as respuesta:
+            cuerpo = json.loads(respuesta.read().decode("utf-8"))
+    except Exception as error:  # red caída, token mal puesto...
+        raise ErrorDeEnvio(f"Telegram no ha contestado: {error}") from error
+    if not cuerpo.get("ok"):
+        raise ErrorDeEnvio(
+            f"Telegram no ha aceptado la consulta: {cuerpo.get('description', cuerpo)}"
+        )
+
+    mensajes: list[dict] = []
+    for actualizacion in cuerpo.get("result") or []:
+        numero = actualizacion.get("update_id")
+        mensaje = actualizacion.get("message") or {}
+        chat = mensaje.get("chat") or {}
+        if numero is None or chat.get("id") is None:
+            continue
+        mensajes.append(
+            {
+                "update_id": numero,
+                "chat_id": str(chat["id"]),
+                "texto": mensaje.get("text") or "",
+            }
+        )
+    return mensajes
+
+
 def crear_notificador(cfg: Config):
     if cfg.canal == "telegram":
         return NotificadorTelegram(cfg.telegram_token, cfg.telegram_chat_id)
