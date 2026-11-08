@@ -11,6 +11,7 @@ from acompanante.notificador import (
     NotificadorTelegram,
     consultar_chats,
     crear_notificador,
+    leer_mensajes,
 )
 
 
@@ -80,6 +81,49 @@ def test_consultar_chats_error_se_explica():
 def test_consultar_chats_sin_token_avisa():
     with pytest.raises(ErrorDeEnvio, match="TELEGRAM_TOKEN"):
         consultar_chats("")
+
+
+def test_leer_mensajes_devuelve_el_texto_y_el_chat():
+    peticiones = []
+    respuesta = {
+        "ok": True,
+        "result": [
+            {"update_id": 10, "message": {"chat": {"id": 999}, "text": "/proximas"}},
+            {"update_id": 11, "message": {"chat": {"id": 1000}, "text": "hola"}},
+        ],
+    }
+    mensajes = leer_mensajes("123:ABC", offset=10, abrir=abridor(respuesta, peticiones))
+
+    assert mensajes == [
+        {"update_id": 10, "chat_id": "999", "texto": "/proximas"},
+        {"update_id": 11, "chat_id": "1000", "texto": "hola"},
+    ]
+    assert "offset=10" in peticiones[0].full_url
+    assert "timeout=30" in peticiones[0].full_url
+    assert peticiones[0].get_method() == "GET"
+
+
+def test_leer_mensajes_sin_texto_no_rompe():
+    respuesta = {
+        "ok": True,
+        "result": [
+            {"update_id": 12, "message": {"chat": {"id": 999}}},
+            {"update_id": 13, "message": {}},
+        ],
+    }
+    mensajes = leer_mensajes("123:ABC", abrir=abridor(respuesta, []))
+    assert mensajes == [{"update_id": 12, "chat_id": "999", "texto": ""}]
+
+
+def test_leer_mensajes_error_se_explica():
+    n = abridor({"ok": False, "description": "Unauthorized"}, [])
+    with pytest.raises(ErrorDeEnvio, match="Unauthorized"):
+        leer_mensajes("123:ABC", abrir=n)
+
+
+def test_leer_mensajes_sin_token_avisa():
+    with pytest.raises(ErrorDeEnvio, match="TELEGRAM_TOKEN"):
+        leer_mensajes("")
 
 
 def test_crear_notificador_por_defecto_es_consola():
