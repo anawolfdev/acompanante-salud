@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from acompanante import db
 from acompanante.config import Config, cargar_env, leer_config
-from acompanante.modelos import TIPOS, Cita
+from acompanante.modelos import TIPOS, Cita, Tarea
 from acompanante.notificador import (
     ErrorDeEnvio,
     NotificadorConsola,
@@ -19,7 +19,15 @@ from acompanante.notificador import (
 )
 from acompanante.plantillas import preparacion_sugerida
 from acompanante.recordatorios import enviar_avisos, momentos_de_aviso, texto_aviso
-from acompanante.textos import fecha_larga, hora_texto, parsear_fecha, parsear_fecha_hora, parsear_hora
+from acompanante.textos import (
+    dias_texto,
+    fecha_larga,
+    hora_texto,
+    parsear_dias,
+    parsear_fecha,
+    parsear_fecha_hora,
+    parsear_hora,
+)
 
 
 def ahora_local(cfg: Config) -> datetime:
@@ -30,6 +38,13 @@ def _linea_cita(cita: Cita) -> str:
     texto = f"[{cita.id}] {fecha_larga(cita.fecha_hora)} a las {hora_texto(cita.fecha_hora)}: {cita.titulo}"
     if cita.lugar:
         texto += f" ({cita.lugar})"
+    return texto
+
+
+def _linea_tarea(tarea: Tarea) -> str:
+    texto = f"[{tarea.id}] {dias_texto(tarea.dias)} a las {hora_texto(tarea.hora)}: {tarea.titulo}"
+    if not tarea.activa:
+        texto += " (pausada)"
     return texto
 
 
@@ -118,6 +133,44 @@ def orden_citas(args, cfg: Config) -> int:
     print(f"Tienes {len(citas)} cita(s):")
     for cita in citas:
         print(_linea_cita(cita))
+    return 0
+
+
+def orden_nueva_tarea(args, cfg: Config) -> int:
+    tarea = Tarea(
+        titulo=args.titulo,
+        dias=parsear_dias(args.dias),
+        hora=parsear_hora(args.hora),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_tarea(con, tarea)
+    print("Tarea guardada:")
+    print(_linea_tarea(tarea))
+    return 0
+
+
+def orden_tareas(args, cfg: Config) -> int:
+    con = db.conectar(cfg.ruta_bd)
+    tareas = db.listar_tareas(con)
+    if not tareas:
+        print("No tienes tareas apuntadas.")
+        return 0
+    print(f"Tienes {len(tareas)} tarea(s):")
+    for tarea in tareas:
+        print(_linea_tarea(tarea))
+    return 0
+
+
+def orden_pausar_tarea(args, cfg: Config) -> int:
+    con = db.conectar(cfg.ruta_bd)
+    tarea = db.obtener_tarea(con, args.id)
+    if not tarea.activa:
+        print("Esa tarea ya estaba pausada.")
+        return 0
+    db.pausar_tarea(con, tarea.id)
+    tarea.activa = False
+    print("Tarea pausada:")
+    print(_linea_tarea(tarea))
     return 0
 
 
@@ -301,6 +354,19 @@ def crear_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("citas", help="Muestra las próximas citas.")
     s.add_argument("--todas", action="store_true", help="Incluye también las que ya pasaron")
     s.set_defaults(funcion=orden_citas)
+
+    s = sub.add_parser("nueva-tarea", help="Apunta algo que se repite cada semana.")
+    s.add_argument("--titulo", required=True, help="Por ejemplo: Tomarte la tensión")
+    s.add_argument("--dias", required=True, help="Por ejemplo: lunes,jueves")
+    s.add_argument("--hora", required=True, help="Por ejemplo: 9:00")
+    s.set_defaults(funcion=orden_nueva_tarea)
+
+    s = sub.add_parser("tareas", help="Muestra las tareas que se repiten cada semana.")
+    s.set_defaults(funcion=orden_tareas)
+
+    s = sub.add_parser("pausar-tarea", help="Pausa una tarea para que deje de avisar.")
+    s.add_argument("id", type=int, help="El número entre corchetes que sale en tareas")
+    s.set_defaults(funcion=orden_pausar_tarea)
 
     s = sub.add_parser("avisos", help="Manda los avisos que tocan ahora.")
     s.add_argument("--ahora", help="Hacer como si fuera esta fecha y hora, por ejemplo: '10/11/2026 10:00'")

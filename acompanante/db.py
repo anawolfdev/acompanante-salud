@@ -4,10 +4,11 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
-from acompanante.modelos import Cita
+from acompanante.modelos import Cita, Tarea
+from acompanante.textos import DIAS
 
 FORMATO = "%Y-%m-%d %H:%M"
 
@@ -28,6 +29,22 @@ CREATE TABLE IF NOT EXISTS avisos_enviados (
     tipo_aviso  TEXT NOT NULL,              -- 'previo' o 'dia'
     enviado_en  TEXT NOT NULL,
     PRIMARY KEY (cita_id, tipo_aviso)
+);
+
+CREATE TABLE IF NOT EXISTS tareas (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    titulo      TEXT NOT NULL,
+    dias        TEXT NOT NULL,              -- 'lunes,jueves'
+    hora        TEXT NOT NULL,              -- 'HH:MM'
+    activa      INTEGER NOT NULL DEFAULT 1,
+    creada_en   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS avisos_tareas_enviados (
+    tarea_id    INTEGER NOT NULL REFERENCES tareas(id) ON DELETE CASCADE,
+    fecha       TEXT NOT NULL,              -- 'AAAA-MM-DD'
+    enviado_en  TEXT NOT NULL,
+    PRIMARY KEY (tarea_id, fecha)
 );
 """
 
@@ -134,5 +151,69 @@ def marcar_aviso_enviado(con: sqlite3.Connection, cita_id: int, tipo_aviso: str,
     con.execute(
         "INSERT OR IGNORE INTO avisos_enviados (cita_id, tipo_aviso, enviado_en) VALUES (?, ?, ?)",
         (cita_id, tipo_aviso, cuando.strftime(FORMATO)),
+    )
+    con.commit()
+
+
+def _fila_a_tarea(fila: sqlite3.Row) -> Tarea:
+    return Tarea(
+        id=fila["id"],
+        titulo=fila["titulo"],
+        dias=[DIAS.index(nombre) for nombre in fila["dias"].split(",") if nombre],
+        hora=datetime.strptime(fila["hora"], "%H:%M").time(),
+        activa=bool(fila["activa"]),
+    )
+
+
+def guardar_tarea(con: sqlite3.Connection, tarea: Tarea) -> int:
+    cur = con.execute(
+        "INSERT INTO tareas (titulo, dias, hora, activa, creada_en) VALUES (?, ?, ?, ?, ?)",
+        (
+            tarea.titulo,
+            ",".join(DIAS[dia] for dia in tarea.dias),
+            tarea.hora.strftime("%H:%M"),
+            1 if tarea.activa else 0,
+            datetime.now().strftime(FORMATO),
+        ),
+    )
+    con.commit()
+    tarea.id = cur.lastrowid
+    return tarea.id
+
+
+def obtener_tarea(con: sqlite3.Connection, tarea_id: int) -> Tarea:
+    fila = con.execute("SELECT * FROM tareas WHERE id = ?", (tarea_id,)).fetchone()
+    if fila is None:
+        raise ValueError(f"No hay ninguna tarea con el número {tarea_id}")
+    return _fila_a_tarea(fila)
+
+
+def listar_tareas(con: sqlite3.Connection, solo_activas: bool = False) -> list[Tarea]:
+    if solo_activas:
+        filas = con.execute("SELECT * FROM tareas WHERE activa = 1 ORDER BY id").fetchall()
+    else:
+        filas = con.execute("SELECT * FROM tareas ORDER BY id").fetchall()
+    return [_fila_a_tarea(fila) for fila in filas]
+
+
+def pausar_tarea(con: sqlite3.Connection, tarea_id: int) -> None:
+    con.execute("UPDATE tareas SET activa = 0 WHERE id = ?", (tarea_id,))
+    con.commit()
+
+
+def aviso_tarea_enviado(con: sqlite3.Connection, tarea_id: int, fecha: date) -> bool:
+    fila = con.execute(
+        "SELECT 1 FROM avisos_tareas_enviados WHERE tarea_id = ? AND fecha = ?",
+        (tarea_id, fecha.strftime("%Y-%m-%d")),
+    ).fetchone()
+    return fila is not None
+
+
+def marcar_aviso_tarea_enviado(
+    con: sqlite3.Connection, tarea_id: int, fecha: date, cuando: datetime
+) -> None:
+    con.execute(
+        "INSERT OR IGNORE INTO avisos_tareas_enviados (tarea_id, fecha, enviado_en) VALUES (?, ?, ?)",
+        (tarea_id, fecha.strftime("%Y-%m-%d"), cuando.strftime(FORMATO)),
     )
     con.commit()

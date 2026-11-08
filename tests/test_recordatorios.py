@@ -1,11 +1,17 @@
-from datetime import datetime
+from datetime import date, datetime, time
 
 import pytest
 
 from acompanante import db
 from acompanante.config import Config
-from acompanante.modelos import Cita
-from acompanante.recordatorios import avisos_pendientes, enviar_avisos, momentos_de_aviso, texto_aviso
+from acompanante.modelos import Cita, Tarea
+from acompanante.recordatorios import (
+    avisos_pendientes,
+    enviar_avisos,
+    momentos_de_aviso,
+    tareas_pendientes,
+    texto_aviso,
+)
 
 CFG = Config()
 
@@ -184,3 +190,95 @@ def test_simular_no_apunta_nada(cfg):
 def test_tipo_no_valido():
     with pytest.raises(ValueError, match="no válido"):
         Cita(titulo="X", tipo="dentista", fecha_hora=datetime(2026, 1, 1, 9, 0))
+
+
+def tarea_tension(dias=(0,), activa=True):
+    return Tarea(
+        id=10,
+        titulo="Tomarte la tensión",
+        dias=list(dias),
+        hora=time(9, 0),
+        activa=activa,
+    )
+
+
+def test_tarea_avisa_el_lunes_a_la_hora():
+    avisos = tareas_pendientes(
+        [tarea_tension()], datetime(2026, 11, 9, 9, 0), lambda _tid, _fecha: False
+    )
+    assert len(avisos) == 1
+    assert avisos[0].texto == "Recordatorio: hoy lunes toca tomarte la tensión."
+
+
+def test_tarea_no_avisa_antes_de_la_hora():
+    assert (
+        tareas_pendientes(
+            [tarea_tension()], datetime(2026, 11, 9, 8, 59), lambda _tid, _fecha: False
+        )
+        == []
+    )
+
+
+def test_tarea_no_avisa_otro_dia():
+    assert (
+        tareas_pendientes(
+            [tarea_tension()], datetime(2026, 11, 10, 9, 0), lambda _tid, _fecha: False
+        )
+        == []
+    )
+
+
+def test_tarea_pausada_no_avisa():
+    assert (
+        tareas_pendientes(
+            [tarea_tension(activa=False)],
+            datetime(2026, 11, 9, 9, 0),
+            lambda _tid, _fecha: False,
+        )
+        == []
+    )
+
+
+def test_tarea_no_se_repite_el_mismo_dia():
+    enviados = set()
+
+    def ya_enviado(tid, fecha):
+        return (tid, fecha) in enviados
+
+    tarea = tarea_tension()
+    primera = tareas_pendientes([tarea], datetime(2026, 11, 9, 9, 0), ya_enviado)
+    for aviso in primera:
+        enviados.add((aviso.tarea.id, date(2026, 11, 9)))
+
+    assert len(primera) == 1
+    assert tareas_pendientes([tarea], datetime(2026, 11, 9, 9, 5), ya_enviado) == []
+
+
+def test_enviar_aviso_de_tarea_no_repite(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_tarea(
+        con, Tarea(titulo="Tomarte la tensión", dias=[0], hora=time(9, 0))
+    )
+
+    class Buzon:
+        def __init__(self):
+            self.mensajes = []
+
+        def enviar(self, texto):
+            self.mensajes.append(texto)
+
+    buzon = Buzon()
+    momento = datetime(2026, 11, 9, 9, 0)
+    assert len(enviar_avisos(con, buzon, momento, cfg)) == 1
+    assert len(enviar_avisos(con, buzon, momento, cfg)) == 0
+    assert buzon.mensajes == ["Recordatorio: hoy lunes toca tomarte la tensión."]
+
+
+def test_simular_tarea_no_apunta_nada(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_tarea(
+        con, Tarea(titulo="Tomarte la tensión", dias=[0], hora=time(9, 0))
+    )
+    momento = datetime(2026, 11, 9, 9, 0)
+    assert len(enviar_avisos(con, None, momento, cfg, simular=True)) == 1
+    assert len(enviar_avisos(con, None, momento, cfg, simular=True)) == 1
