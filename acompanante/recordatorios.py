@@ -10,19 +10,21 @@ Reglas de la etapa 1:
 - Si varios avisos tocan a la vez (por ejemplo, la cita se apuntó tarde),
   solo se manda el más importante: primero el del día, luego el de la víspera
   y por último el previo.
+- Las tareas (por ejemplo, tomarse la tensión) avisan el día que toca a su
+  hora, una sola vez al día.
 """
 
 from __future__ import annotations
 
 import sqlite3
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from typing import Callable
 
 from acompanante import db
 from acompanante.config import Config
-from acompanante.modelos import TIPOS, Cita
-from acompanante.textos import cuando, fecha_larga, hora_texto, parsear_hora
+from acompanante.modelos import TIPOS, Cita, Tarea
+from acompanante.textos import DIAS, cuando, fecha_larga, hora_texto, parsear_hora
 
 
 @dataclass
@@ -32,6 +34,13 @@ class Aviso:
     momento: datetime
     texto: str
     cubre: list[str] = field(default_factory=list)  # tipos que quedan atendidos con este envío
+
+
+@dataclass
+class AvisoTarea:
+    tarea: Tarea
+    momento: datetime
+    texto: str
 
 
 def necesita_ayunas(cita: Cita) -> bool:
@@ -115,17 +124,56 @@ def avisos_pendientes(
     return pendientes
 
 
-def enviar_avisos(con: sqlite3.Connection, notificador, ahora: datetime, cfg: Config, simular: bool = False) -> list[Aviso]:
+def texto_tarea(tarea: Tarea, dia: date) -> str:
+    """'Recordatorio: hoy lunes toca tomarte la tensión.'"""
+    titulo = tarea.titulo.strip()
+    titulo = titulo[0].lower() + titulo[1:]
+    return f"Recordatorio: hoy {DIAS[dia.weekday()]} toca {titulo}."
+
+
+def tareas_pendientes(
+    tareas: list[Tarea],
+    ahora: datetime,
+    ya_enviado: Callable[[int, date], bool],
+) -> list[AvisoTarea]:
+    """Tareas que tocan ahora y que todavía no se han avisado hoy."""
+    pendientes: list[AvisoTarea] = []
+    for tarea in tareas:
+        if not tarea.activa or ahora.weekday() not in tarea.dias:
+            continue
+        momento = datetime.combine(ahora.date(), tarea.hora)
+        if momento > ahora or ya_enviado(tarea.id, ahora.date()):
+            continue
+        pendientes.append(
+            AvisoTarea(
+                tarea=tarea,
+                momento=momento,
+                texto=texto_tarea(tarea, ahora.date()),
+            )
+        )
+    return pendientes
+
+
+def enviar_avisos(
+    con: sqlite3.Connection, notificador, ahora: datetime, cfg: Config, simular: bool = False
+) -> list[Aviso | AvisoTarea]:
     """Manda los avisos que tocan y los apunta para no repetirlos.
 
     Con simular=True solo los devuelve, sin mandar ni apuntar nada.
     """
     citas = db.listar_citas(con, desde=ahora)
     avisos = avisos_pendientes(citas, ahora, cfg, lambda cid, t: db.aviso_enviado(con, cid, t))
+    tareas = db.listar_tareas(con, solo_activas=True)
+    avisos += tareas_pendientes(
+        tareas, ahora, lambda tid, fecha: db.aviso_tarea_enviado(con, tid, fecha)
+    )
     if simular:
         return avisos
     for aviso in avisos:
         notificador.enviar(aviso.texto)
-        for tipo in aviso.cubre:
-            db.marcar_aviso_enviado(con, aviso.cita.id, tipo, ahora)
+        if isinstance(aviso, AvisoTarea):
+            db.marcar_aviso_tarea_enviado(con, aviso.tarea.id, ahora.date(), ahora)
+        else:
+            for tipo in aviso.cubre:
+                db.marcar_aviso_enviado(con, aviso.cita.id, tipo, ahora)
     return avisos

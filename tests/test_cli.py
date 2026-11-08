@@ -347,3 +347,70 @@ def test_vacuna_sin_preparar_usa_su_lista_sugerida(cfg, capsys):
     salida = capsys.readouterr().out
     assert "1. Lleva la tarjeta sanitaria." in salida
     assert "2. Lleva la cartilla de vacunación si la tienes." in salida
+
+
+def crear_tarea_de_la_tension(cfg):
+    return main([
+        "nueva-tarea", "--titulo", "Tomarte la tensión",
+        "--dias", "lunes,jueves", "--hora", "9:00",
+    ], cfg)
+
+
+def test_nueva_tarea_y_lista(cfg, capsys):
+    assert crear_tarea_de_la_tension(cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Tarea guardada:" in salida
+    assert "[1] lunes y jueves a las 9:00: Tomarte la tensión" in salida
+
+    assert main(["tareas"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Tienes 1 tarea(s):" in salida
+    assert "[1] lunes y jueves a las 9:00: Tomarte la tensión" in salida
+
+
+def test_tareas_sin_ninguna(cfg, capsys):
+    assert main(["tareas"], cfg) == 0
+    assert "No tienes tareas apuntadas." in capsys.readouterr().out
+
+
+def test_tarea_avisa_el_dia_y_no_se_repite(cfg, capsys):
+    assert crear_tarea_de_la_tension(cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--ahora", "09/11/2026 9:00"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Recordatorio: hoy lunes toca tomarte la tensión." in salida
+    assert "Avisos enviados: 1" in salida
+
+    assert main(["avisos", "--ahora", "09/11/2026 9:05"], cfg) == 0
+    assert "no toca ningún aviso" in capsys.readouterr().out
+
+
+def test_pausar_tarea_deja_de_avisar(cfg, capsys):
+    assert crear_tarea_de_la_tension(cfg) == 0
+    capsys.readouterr()
+
+    assert main(["avisos", "--simular", "--ahora", "09/11/2026 9:00"], cfg) == 0
+    assert "Recordatorio: hoy lunes toca tomarte la tensión." in capsys.readouterr().out
+
+    assert main(["pausar-tarea", "1"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Tarea pausada:" in salida
+    assert "(pausada)" in salida
+
+    assert main(["avisos", "--simular", "--ahora", "09/11/2026 9:00"], cfg) == 0
+    assert "no toca ningún aviso" in capsys.readouterr().out
+
+
+def test_pausar_tarea_con_numero_que_no_existe(cfg, capsys):
+    assert main(["pausar-tarea", "7"], cfg) == 1
+    assert "No hay ninguna tarea con el número 7" in capsys.readouterr().out
+
+
+def test_dia_mal_escrito_no_rompe(cfg, capsys):
+    codigo = main([
+        "nueva-tarea", "--titulo", "Tomarte la tensión",
+        "--dias", "finde", "--hora", "9:00",
+    ], cfg)
+    assert codigo == 1
+    assert "lunes,jueves" in capsys.readouterr().out

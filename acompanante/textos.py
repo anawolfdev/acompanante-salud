@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, datetime, time
 
 DIAS = ["lunes", "martes", "miércoles", "jueves", "viernes", "sábado", "domingo"]
@@ -53,6 +54,42 @@ def parsear_hora(texto: str) -> time:
         return datetime.strptime(texto, "%H:%M").time()
     except ValueError:
         raise ValueError(f"No entiendo la hora '{texto}'. Escríbela así: 8:30") from None
+
+
+def _sin_tildes(texto: str) -> str:
+    return "".join(
+        letra for letra in unicodedata.normalize("NFD", texto)
+        if unicodedata.category(letra) != "Mn"
+    )
+
+
+def parsear_dias(texto: str) -> list[int]:
+    """Acepta 'lunes', 'lunes,jueves' o 'lunes, jueves'. Devuelve 0 para lunes."""
+    dias: list[int] = []
+    for parte in texto.replace(";", ",").split(","):
+        nombre = _sin_tildes(parte.strip().lower())
+        if not nombre:
+            continue
+        for numero, dia in enumerate(DIAS):
+            if _sin_tildes(dia) == nombre:
+                if numero not in dias:
+                    dias.append(numero)
+                break
+        else:
+            raise ValueError(
+                f"No entiendo el día '{parte.strip()}'. Escríbelo así: lunes,jueves"
+            )
+    if not dias:
+        raise ValueError("Escribe al menos un día, por ejemplo: lunes,jueves")
+    return sorted(dias)
+
+
+def dias_texto(dias: list[int]) -> str:
+    """'lunes', 'lunes y jueves' o 'lunes, miércoles y viernes'."""
+    nombres = [DIAS[numero] for numero in dias]
+    if len(nombres) == 1:
+        return nombres[0]
+    return ", ".join(nombres[:-1]) + " y " + nombres[-1]
 
 
 def parsear_fecha_hora(texto: str) -> datetime:
