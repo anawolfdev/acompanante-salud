@@ -414,3 +414,75 @@ def test_dia_mal_escrito_no_rompe(cfg, capsys):
     ], cfg)
     assert codigo == 1
     assert "lunes,jueves" in capsys.readouterr().out
+
+
+def test_apuntar_tension_y_ver_el_historial(cfg, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "acompanante.cli.ahora_local", lambda _cfg: datetime(2026, 11, 9, 9, 5)
+    )
+
+    assert main([
+        "tension", "130", "85", "--pulso", "72", "--nota", "después de cenar",
+    ], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Tensión guardada:" in salida
+    assert (
+        "lunes 9 de noviembre, 9:05: 130 de alta, 85 de baja, pulso 72. "
+        "Nota: después de cenar"
+    ) in salida
+
+    assert main(["historial-tension"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "Estas son tus últimas tomas de tensión:" in salida
+    assert (
+        "lunes 9 de noviembre, 9:05: 130 de alta, 85 de baja, pulso 72. "
+        "Nota: después de cenar"
+    ) in salida
+
+
+def test_tension_sin_pulso_no_ensena_pulso(cfg, capsys, monkeypatch):
+    monkeypatch.setattr(
+        "acompanante.cli.ahora_local", lambda _cfg: datetime(2026, 11, 9, 9, 5)
+    )
+    assert main(["tension", "130", "85"], cfg) == 0
+    capsys.readouterr()
+
+    assert main(["historial-tension"], cfg) == 0
+    salida = capsys.readouterr().out
+    assert "lunes 9 de noviembre, 9:05: 130 de alta, 85 de baja" in salida
+    assert "pulso" not in salida
+
+
+def test_historial_de_tension_sin_tomas(cfg, capsys):
+    assert main(["historial-tension"], cfg) == 0
+    assert "No tienes ninguna toma de tensión apuntada." in capsys.readouterr().out
+
+
+def test_tension_con_alta_menor_que_baja_avisa(cfg, capsys):
+    codigo = main(["tension", "85", "130"], cfg)
+    assert codigo == 1
+    salida = capsys.readouterr().out
+    assert "La tensión de alta no puede ser menor que la de baja" in salida
+    assert "Revisa los números" in salida
+
+
+def test_tension_con_letras_avisa(cfg, capsys):
+    codigo = main(["tension", "alta", "85"], cfg)
+    assert codigo == 1
+    salida = capsys.readouterr().out
+    assert "La tensión de alta tiene que ser un número entero" in salida
+    assert "Por ejemplo: 130" in salida
+
+
+def test_tension_con_pulso_mal_escrito_avisa(cfg, capsys):
+    codigo = main(["tension", "130", "85", "--pulso", "mucho"], cfg)
+    assert codigo == 1
+    salida = capsys.readouterr().out
+    assert "El pulso tiene que ser un número entero" in salida
+    assert "Por ejemplo: 72" in salida
+
+
+def test_tension_con_numero_que_no_es_positivo_avisa(cfg, capsys):
+    codigo = main(["tension", "0", "85"], cfg)
+    assert codigo == 1
+    assert "La tensión de alta tiene que ser un número mayor que cero" in capsys.readouterr().out
