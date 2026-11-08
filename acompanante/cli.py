@@ -9,7 +9,7 @@ from zoneinfo import ZoneInfo
 
 from acompanante import db
 from acompanante.config import Config, cargar_env, leer_config
-from acompanante.modelos import TIPOS, Cita, Tarea
+from acompanante.modelos import TIPOS, Cita, Tarea, Tension
 from acompanante.notificador import (
     ErrorDeEnvio,
     NotificadorConsola,
@@ -46,6 +46,30 @@ def _linea_tarea(tarea: Tarea) -> str:
     if not tarea.activa:
         texto += " (pausada)"
     return texto
+
+
+def _linea_tension(tension: Tension) -> str:
+    texto = (
+        f"{fecha_larga(tension.fecha_hora)}, {hora_texto(tension.fecha_hora)}: "
+        f"{tension.alta} de alta, {tension.baja} de baja"
+    )
+    if tension.pulso is not None:
+        texto += f", pulso {tension.pulso}"
+    if tension.nota:
+        texto += f". Nota: {tension.nota}"
+    return texto
+
+
+def _entero_positivo(texto: str, nombre: str, ejemplo: int) -> int:
+    try:
+        valor = int(texto)
+    except (TypeError, ValueError):
+        raise ValueError(
+            f"{nombre} tiene que ser un número entero. Por ejemplo: {ejemplo}"
+        ) from None
+    if valor <= 0:
+        raise ValueError(f"{nombre} tiene que ser un número mayor que cero")
+    return valor
 
 
 def orden_iniciar(args, cfg: Config) -> int:
@@ -171,6 +195,38 @@ def orden_pausar_tarea(args, cfg: Config) -> int:
     tarea.activa = False
     print("Tarea pausada:")
     print(_linea_tarea(tarea))
+    return 0
+
+
+def orden_tension(args, cfg: Config) -> int:
+    alta = _entero_positivo(args.alta, "La tensión de alta", 130)
+    baja = _entero_positivo(args.baja, "La tensión de baja", 85)
+    pulso = None
+    if args.pulso is not None:
+        pulso = _entero_positivo(args.pulso, "El pulso", 72)
+    tension = Tension(
+        fecha_hora=ahora_local(cfg),
+        alta=alta,
+        baja=baja,
+        pulso=pulso,
+        nota=args.nota or "",
+    )
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_tension(con, tension)
+    print("Tensión guardada:")
+    print(_linea_tension(tension))
+    return 0
+
+
+def orden_historial_tension(args, cfg: Config) -> int:
+    con = db.conectar(cfg.ruta_bd)
+    tomas = db.listar_tensiones(con)
+    if not tomas:
+        print("No tienes ninguna toma de tensión apuntada.")
+        return 0
+    print("Estas son tus últimas tomas de tensión:")
+    for toma in tomas:
+        print(_linea_tension(toma))
     return 0
 
 
@@ -367,6 +423,16 @@ def crear_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("pausar-tarea", help="Pausa una tarea para que deje de avisar.")
     s.add_argument("id", type=int, help="El número entre corchetes que sale en tareas")
     s.set_defaults(funcion=orden_pausar_tarea)
+
+    s = sub.add_parser("tension", help="Apunta una toma de tensión.")
+    s.add_argument("alta", help="Tensión de alta (sistólica). Por ejemplo: 130")
+    s.add_argument("baja", help="Tensión de baja (diastólica). Por ejemplo: 85")
+    s.add_argument("--pulso", help="Pulsaciones. Por ejemplo: 72")
+    s.add_argument("--nota", help="Cualquier nota, por ejemplo: después de cenar")
+    s.set_defaults(funcion=orden_tension)
+
+    s = sub.add_parser("historial-tension", help="Muestra las últimas 10 tomas de tensión.")
+    s.set_defaults(funcion=orden_historial_tension)
 
     s = sub.add_parser("avisos", help="Manda los avisos que tocan ahora.")
     s.add_argument("--ahora", help="Hacer como si fuera esta fecha y hora, por ejemplo: '10/11/2026 10:00'")

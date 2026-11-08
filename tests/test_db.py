@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 
 from acompanante import db
-from acompanante.modelos import Cita, Tarea
+from acompanante.modelos import Cita, Tarea, Tension
 
 
 def test_guardar_y_leer_cita_con_preparacion(cfg):
@@ -117,3 +117,49 @@ def test_aviso_de_tarea_enviado_se_recuerda(cfg):
     db.marcar_aviso_tarea_enviado(con, tid, lunes, datetime(2026, 11, 9, 9, 5))
     assert db.aviso_tarea_enviado(con, tid, lunes)
     assert not db.aviso_tarea_enviado(con, tid, date(2026, 11, 16))
+
+
+def test_guardar_y_leer_tension(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    tension = Tension(
+        fecha_hora=datetime(2026, 11, 9, 9, 5),
+        alta=130,
+        baja=85,
+        pulso=72,
+        nota="después de cenar",
+    )
+    nuevo_id = db.guardar_tension(con, tension)
+
+    leidas = db.listar_tensiones(con)
+    assert len(leidas) == 1
+    assert leidas[0].id == nuevo_id
+    assert leidas[0].fecha_hora == datetime(2026, 11, 9, 9, 5)
+    assert leidas[0].alta == 130
+    assert leidas[0].baja == 85
+    assert leidas[0].pulso == 72
+    assert leidas[0].nota == "después de cenar"
+
+
+def test_tension_sin_pulso_ni_nota(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_tension(
+        con, Tension(fecha_hora=datetime(2026, 11, 9, 9, 5), alta=130, baja=85)
+    )
+
+    leida = db.listar_tensiones(con)[0]
+    assert leida.pulso is None
+    assert leida.nota == ""
+
+
+def test_listar_tensiones_devuelve_las_10_mas_recientes(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    for dia in range(1, 13):
+        db.guardar_tension(
+            con, Tension(fecha_hora=datetime(2026, 11, dia, 9, 0), alta=120, baja=80)
+        )
+
+    leidas = db.listar_tensiones(con)
+    assert len(leidas) == 10
+    assert [toma.fecha_hora.day for toma in leidas] == [
+        12, 11, 10, 9, 8, 7, 6, 5, 4, 3
+    ]

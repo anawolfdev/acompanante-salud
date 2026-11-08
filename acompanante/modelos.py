@@ -50,3 +50,31 @@ class Tarea:
             raise ValueError("La tarea necesita al menos un día, por ejemplo: lunes")
         if any(dia < 0 or dia > 6 for dia in self.dias):
             raise ValueError("Los días de la tarea no son válidos. Usa lunes, martes...")
+
+
+@dataclass
+class Tension:
+    """Una toma de tensión. Solo se guarda y se enseña; no se interpreta."""
+
+    fecha_hora: datetime  # hora local de Madrid, sin zona (naive)
+    alta: int
+    baja: int
+    pulso: int | None = None
+    nota: str = ""
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        for nombre, valor in (("alta", self.alta), ("baja", self.baja)):
+            if not isinstance(valor, int) or isinstance(valor, bool):
+                raise ValueError(f"La tensión de {nombre} tiene que ser un número entero")
+            if valor <= 0:
+                raise ValueError(f"La tensión de {nombre} tiene que ser mayor que cero")
+        if self.pulso is not None:
+            if not isinstance(self.pulso, int) or isinstance(self.pulso, bool):
+                raise ValueError("El pulso tiene que ser un número entero")
+            if self.pulso <= 0:
+                raise ValueError("El pulso tiene que ser mayor que cero")
+        if self.alta < self.baja:
+            raise ValueError(
+                "La tensión de alta no puede ser menor que la de baja. Revisa los números"
+            )

@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from acompanante.modelos import Cita, Tarea
+from acompanante.modelos import Cita, Tarea, Tension
 from acompanante.textos import DIAS
 
 FORMATO = "%Y-%m-%d %H:%M"
@@ -45,6 +45,16 @@ CREATE TABLE IF NOT EXISTS avisos_tareas_enviados (
     fecha       TEXT NOT NULL,              -- 'AAAA-MM-DD'
     enviado_en  TEXT NOT NULL,
     PRIMARY KEY (tarea_id, fecha)
+);
+
+CREATE TABLE IF NOT EXISTS tensiones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha_hora  TEXT NOT NULL,              -- 'AAAA-MM-DD HH:MM', hora de Madrid
+    alta        INTEGER NOT NULL,           -- sistólica
+    baja        INTEGER NOT NULL,           -- diastólica
+    pulso       INTEGER,                    -- opcional
+    nota        TEXT NOT NULL DEFAULT '',
+    creada_en   TEXT NOT NULL
 );
 """
 
@@ -217,3 +227,41 @@ def marcar_aviso_tarea_enviado(
         (tarea_id, fecha.strftime("%Y-%m-%d"), cuando.strftime(FORMATO)),
     )
     con.commit()
+
+
+def _fila_a_tension(fila: sqlite3.Row) -> Tension:
+    return Tension(
+        id=fila["id"],
+        fecha_hora=datetime.strptime(fila["fecha_hora"], FORMATO),
+        alta=fila["alta"],
+        baja=fila["baja"],
+        pulso=fila["pulso"],
+        nota=fila["nota"],
+    )
+
+
+def guardar_tension(con: sqlite3.Connection, tension: Tension) -> int:
+    cur = con.execute(
+        "INSERT INTO tensiones (fecha_hora, alta, baja, pulso, nota, creada_en)"
+        " VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            tension.fecha_hora.strftime(FORMATO),
+            tension.alta,
+            tension.baja,
+            tension.pulso,
+            tension.nota,
+            datetime.now().strftime(FORMATO),
+        ),
+    )
+    con.commit()
+    tension.id = cur.lastrowid
+    return tension.id
+
+
+def listar_tensiones(con: sqlite3.Connection, limite: int = 10) -> list[Tension]:
+    """Las últimas tomas, de la más reciente a la más antigua."""
+    filas = con.execute(
+        "SELECT * FROM tensiones ORDER BY fecha_hora DESC, id DESC LIMIT ?",
+        (limite,),
+    ).fetchall()
+    return [_fila_a_tension(fila) for fila in filas]
