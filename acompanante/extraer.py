@@ -110,12 +110,17 @@ def _json_de_respuesta(respuesta: str) -> dict:
     return datos
 
 
-def _texto_peticion(texto: str, ahora: datetime) -> str:
-    return (
-        f"Hoy es {fecha_larga(ahora)} de {ahora.year}, en hora de Madrid.\n"
-        f"Frase de la persona: {texto}\n"
-        "Devuelve el JSON de la cita."
-    )
+def _texto_peticion(texto: str, ahora: datetime, con_imagen: bool = False) -> str:
+    lineas = [f"Hoy es {fecha_larga(ahora)} de {ahora.year}, en hora de Madrid."]
+    if con_imagen:
+        lineas.append("La persona ha mandado una foto del papel de la cita.")
+        lineas.append("Lee en la foto la fecha, la hora, el lugar y lo que hay que preparar.")
+        if texto.strip():
+            lineas.append(f"Además ha escrito: {texto.strip()}")
+    else:
+        lineas.append(f"Frase de la persona: {texto}")
+    lineas.append("Devuelve el JSON de la cita.")
+    return "\n".join(lineas)
 
 
 def extraer_cita(
@@ -123,9 +128,11 @@ def extraer_cita(
     cfg: Config | None = None,
     ahora: datetime | None = None,
     cliente=None,
+    imagen: bytes | None = None,
 ) -> PropuestaCita:
     """Pide a la IA los datos de la cita y los devuelve ya comprobados.
 
+    'imagen' son los bytes de una foto del papel de la cita, si la hay.
     'cliente' sirve para las pruebas: así no hace falta Internet.
     """
     if cfg is None:
@@ -136,7 +143,11 @@ def extraer_cita(
     if cliente is None:
         cliente = crear_cliente_ia(cfg)
 
-    respuesta = cliente.preguntar(_texto_peticion(texto, ahora), sistema=SISTEMA)
+    respuesta = cliente.preguntar(
+        _texto_peticion(texto, ahora, con_imagen=imagen is not None),
+        imagen=imagen,
+        sistema=SISTEMA,
+    )
     datos = _json_de_respuesta(respuesta)
 
     tipo = _normalizar_tipo(datos.get("tipo"))

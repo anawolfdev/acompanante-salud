@@ -8,6 +8,7 @@ from acompanante.conversacion import (
     FALTAN_DATOS,
     IA_NO_ACTIVADA,
     NO_ENTENDIDO,
+    NO_LEIDO_PAPEL,
     debe_responder,
     responder,
 )
@@ -168,7 +169,7 @@ def test_una_frase_propone_la_cita_y_pide_confirmacion(cfg, monkeypatch):
     activar_ia(cfg)
     monkeypatch.setattr(
         "acompanante.conversacion.extraer_cita",
-        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+        lambda texto, cfg, ahora=None, imagen=None: propuesta_de_ejemplo(),
     )
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(
@@ -193,7 +194,7 @@ def test_responde_si_y_guarda_la_cita(cfg, monkeypatch):
     activar_ia(cfg)
     monkeypatch.setattr(
         "acompanante.conversacion.extraer_cita",
-        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+        lambda texto, cfg, ahora=None, imagen=None: propuesta_de_ejemplo(),
     )
     con = db.conectar(cfg.ruta_bd)
     responder(
@@ -218,7 +219,7 @@ def test_responde_no_y_no_guarda_nada(cfg, monkeypatch):
     activar_ia(cfg)
     monkeypatch.setattr(
         "acompanante.conversacion.extraer_cita",
-        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+        lambda texto, cfg, ahora=None, imagen=None: propuesta_de_ejemplo(),
     )
     con = db.conectar(cfg.ruta_bd)
     responder(
@@ -239,7 +240,7 @@ def test_si_falta_la_fecha_o_la_hora_se_pregunta(cfg, monkeypatch):
     activar_ia(cfg)
     monkeypatch.setattr(
         "acompanante.conversacion.extraer_cita",
-        lambda texto, cfg, ahora=None: PropuestaCita(
+        lambda texto, cfg, ahora=None, imagen=None: PropuestaCita(
             titulo="Analítica de sangre", tipo="analitica"
         ),
     )
@@ -252,10 +253,78 @@ def test_si_falta_la_fecha_o_la_hora_se_pregunta(cfg, monkeypatch):
     assert citas == []
 
 
+def test_una_foto_propone_la_cita_y_pide_confirmacion(cfg, monkeypatch):
+    activar_ia(cfg)
+    recibidas = []
+
+    def extraer(texto, cfg, ahora=None, imagen=None):
+        recibidas.append(imagen)
+        return propuesta_de_ejemplo()
+
+    monkeypatch.setattr("acompanante.conversacion.extraer_cita", extraer)
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(
+        con, cfg, "", ahora=datetime(2026, 11, 11, 10, 0), imagen=b"\xff\xd8foto"
+    )
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert recibidas == [b"\xff\xd8foto"]
+    assert "He entendido esta cita:" in respuesta
+    assert "Analítica de sangre" in respuesta
+    assert "jueves 12 de noviembre a las 8:30" in respuesta
+    assert "Lugar: Centro de salud" in respuesta
+    assert "1. Ve en ayunas" in respuesta
+    assert "¿La guardo? Responde sí o no." in respuesta
+    assert citas == []
+
+
+def test_una_foto_se_guarda_solo_al_decir_si(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None, imagen=None: propuesta_de_ejemplo(),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    responder(con, cfg, "", ahora=datetime(2026, 11, 11, 10, 0), imagen=b"\xff\xd8foto")
+    respuesta = responder(con, cfg, "sí", ahora=datetime(2026, 11, 11, 10, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "Cita guardada:" in respuesta
+    assert len(citas) == 1
+    assert citas[0].fecha_hora == datetime(2026, 11, 12, 8, 30)
+
+
+def test_una_foto_que_no_se_lee_avisa(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None, imagen=None: PropuestaCita(
+            titulo="Papel de la cita", tipo="cita"
+        ),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "", imagen=b"\xff\xd8foto")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == NO_LEIDO_PAPEL
+    assert "No consigo leer bien el papel." in respuesta
+    assert citas == []
+
+
+def test_una_foto_sin_ia_avisa_de_que_no_esta_activada(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "", imagen=b"\xff\xd8foto")
+    con.close()
+    assert respuesta == IA_NO_ACTIVADA
+
+
 def test_si_la_ia_falla_avisa_sin_jerga(cfg, monkeypatch):
     activar_ia(cfg)
 
-    def falla(texto, cfg, ahora=None):
+    def falla(texto, cfg, ahora=None, imagen=None):
         raise IANoDisponible("El proveedor ha fallado")
 
     monkeypatch.setattr("acompanante.conversacion.extraer_cita", falla)

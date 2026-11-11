@@ -11,6 +11,7 @@ from acompanante.notificador import (
     NotificadorTelegram,
     consultar_chats,
     crear_notificador,
+    descargar_foto,
     leer_mensajes,
 )
 
@@ -95,8 +96,8 @@ def test_leer_mensajes_devuelve_el_texto_y_el_chat():
     mensajes = leer_mensajes("123:ABC", offset=10, abrir=abridor(respuesta, peticiones))
 
     assert mensajes == [
-        {"update_id": 10, "chat_id": "999", "texto": "/proximas"},
-        {"update_id": 11, "chat_id": "1000", "texto": "hola"},
+        {"update_id": 10, "chat_id": "999", "texto": "/proximas", "foto": ""},
+        {"update_id": 11, "chat_id": "1000", "texto": "hola", "foto": ""},
     ]
     assert "offset=10" in peticiones[0].full_url
     assert "timeout=30" in peticiones[0].full_url
@@ -112,7 +113,7 @@ def test_leer_mensajes_sin_texto_no_rompe():
         ],
     }
     mensajes = leer_mensajes("123:ABC", abrir=abridor(respuesta, []))
-    assert mensajes == [{"update_id": 12, "chat_id": "999", "texto": ""}]
+    assert mensajes == [{"update_id": 12, "chat_id": "999", "texto": "", "foto": ""}]
 
 
 def test_leer_mensajes_error_se_explica():
@@ -124,6 +125,81 @@ def test_leer_mensajes_error_se_explica():
 def test_leer_mensajes_sin_token_avisa():
     with pytest.raises(ErrorDeEnvio, match="TELEGRAM_TOKEN"):
         leer_mensajes("")
+
+
+def test_leer_mensajes_devuelve_la_foto_mas_grande():
+    respuesta = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 14,
+                "message": {
+                    "chat": {"id": 999},
+                    "photo": [{"file_id": "pequena"}, {"file_id": "grande"}],
+                },
+            },
+        ],
+    }
+    mensajes = leer_mensajes("123:ABC", abrir=abridor(respuesta, []))
+
+    assert mensajes[0]["foto"] == "grande"
+    assert mensajes[0]["texto"] == ""
+
+
+def test_leer_mensajes_usa_el_texto_que_acompana_a_la_foto():
+    respuesta = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 15,
+                "message": {
+                    "chat": {"id": 999},
+                    "caption": "la cita del especialista",
+                    "photo": [{"file_id": "foto-1"}],
+                },
+            },
+        ],
+    }
+    mensajes = leer_mensajes("123:ABC", abrir=abridor(respuesta, []))
+
+    assert mensajes[0]["texto"] == "la cita del especialista"
+    assert mensajes[0]["foto"] == "foto-1"
+
+
+def test_descargar_foto_pide_la_direccion_y_baja_los_bytes():
+    peticiones = []
+    respuestas = [
+        {"ok": True, "result": {"file_path": "photos/foto.jpg"}},
+        b"\xff\xd8foto",
+    ]
+
+    def abrir(peticion, timeout=None):
+        peticiones.append(peticion)
+        respuesta = respuestas[len(peticiones) - 1]
+        if isinstance(respuesta, dict):
+            return RespuestaFalsa(json.dumps(respuesta).encode())
+        return RespuestaFalsa(respuesta)
+
+    foto = descargar_foto("123:ABC", "file-1", abrir=abrir)
+
+    assert foto == b"\xff\xd8foto"
+    assert peticiones[0].full_url == "https://api.telegram.org/bot123:ABC/getFile?file_id=file-1"
+    assert peticiones[1].full_url == "https://api.telegram.org/file/bot123:ABC/photos/foto.jpg"
+
+
+def test_descargar_foto_sin_token_avisa():
+    with pytest.raises(ErrorDeEnvio, match="TELEGRAM_TOKEN"):
+        descargar_foto("", "file-1")
+
+
+def test_descargar_foto_si_telegram_falla_avisa():
+    def abrir(peticion, timeout=None):
+        return RespuestaFalsa(
+            json.dumps({"ok": False, "description": "file is too big"}).encode()
+        )
+
+    with pytest.raises(ErrorDeEnvio, match="file is too big"):
+        descargar_foto("123:ABC", "file-1", abrir=abrir)
 
 
 def test_crear_notificador_por_defecto_es_consola():

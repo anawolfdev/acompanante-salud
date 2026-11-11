@@ -92,10 +92,11 @@ def consultar_chats(token: str, abrir=None) -> list[tuple[str, str]]:
 def leer_mensajes(token: str, offset: int | None = None, timeout: int = 30, abrir=None) -> list[dict]:
     """Pregunta a Telegram por los mensajes nuevos que le han escrito al bot.
 
-    Devuelve una lista de diccionarios con 'update_id', 'chat_id' y 'texto'.
-    Con 'offset' se pide a Telegram que no vuelva a mandar los mensajes anteriores.
-    Con 'timeout' se usa long polling: Telegram mantiene la conexión abierta hasta
-    que llega un mensaje o pasan esos segundos.
+    Devuelve una lista de diccionarios con 'update_id', 'chat_id', 'texto' y 'foto'.
+    'foto' es el identificador de la foto que ha mandado la persona, o "" si no
+    hay foto. Con 'offset' se pide a Telegram que no vuelva a mandar los mensajes
+    anteriores. Con 'timeout' se usa long polling: Telegram mantiene la conexión
+    abierta hasta que llega un mensaje o pasan esos segundos.
     """
     if not token:
         raise ErrorDeEnvio(
@@ -129,14 +130,57 @@ def leer_mensajes(token: str, offset: int | None = None, timeout: int = 30, abri
         chat = mensaje.get("chat") or {}
         if numero is None or chat.get("id") is None:
             continue
+        fotos = mensaje.get("photo") or []
+        foto = fotos[-1].get("file_id") if fotos else ""
         mensajes.append(
             {
                 "update_id": numero,
                 "chat_id": str(chat["id"]),
-                "texto": mensaje.get("text") or "",
+                "texto": mensaje.get("text") or mensaje.get("caption") or "",
+                "foto": foto or "",
             }
         )
     return mensajes
+
+
+def descargar_foto(token: str, file_id: str, abrir=None) -> bytes:
+    """Descarga la foto que ha mandado la persona al bot de Telegram.
+
+    Primero pregunta a Telegram dónde está el archivo (getFile) y después
+    descarga los bytes de la foto.
+    """
+    if not token:
+        raise ErrorDeEnvio(
+            "Falta TELEGRAM_TOKEN en el archivo .env. "
+            "Copia el token de @BotFather y pégalo ahí. "
+            "Mira la GUIA.md (paso 0.8) y el ticket ACS-002."
+        )
+    if abrir is None:
+        abrir = urllib.request.urlopen
+    url = "https://api.telegram.org/bot{token}/getFile?{consulta}".format(
+        token=token, consulta=urllib.parse.urlencode({"file_id": file_id})
+    )
+    peticion = urllib.request.Request(url, method="GET")
+    try:
+        with abrir(peticion, timeout=20) as respuesta:
+            cuerpo = json.loads(respuesta.read().decode("utf-8"))
+    except Exception as error:  # red caída, token mal puesto...
+        raise ErrorDeEnvio(f"Telegram no ha contestado: {error}") from error
+    if not cuerpo.get("ok"):
+        raise ErrorDeEnvio(
+            f"Telegram no ha aceptado la consulta: {cuerpo.get('description', cuerpo)}"
+        )
+    ruta = (cuerpo.get("result") or {}).get("file_path")
+    if not ruta:
+        raise ErrorDeEnvio("Telegram no ha mandado la dirección de la foto.")
+
+    url_foto = "https://api.telegram.org/file/bot{token}/{ruta}".format(token=token, ruta=ruta)
+    peticion_foto = urllib.request.Request(url_foto, method="GET")
+    try:
+        with abrir(peticion_foto, timeout=30) as respuesta:
+            return respuesta.read()
+    except Exception as error:  # red caída mientras baja la foto...
+        raise ErrorDeEnvio(f"No se ha podido descargar la foto: {error}") from error
 
 
 def crear_notificador(cfg: Config):

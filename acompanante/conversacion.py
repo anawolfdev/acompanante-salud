@@ -48,6 +48,10 @@ FALTAN_DATOS = (
 )
 PREGUNTA_GUARDAR = "¿La guardo? Responde sí o no."
 NO_GUARDADA = "No la he guardado. No se ha apuntado nada."
+NO_LEIDO_PAPEL = (
+    "No consigo leer bien el papel.\n"
+    "Prueba con más luz, o escríbeme la cita."
+)
 
 # Citas propuestas que esperan un "sí" o un "no". Se guardan en memoria
 # porque solo hay una persona usando el bot.
@@ -137,32 +141,34 @@ def _clave_chat(chat_id) -> str:
     return "local" if chat_id is None else str(chat_id)
 
 
-def _responder_frase(con, cfg: Config, texto: str, ahora: datetime, chat_id) -> str:
+def _responder_frase(
+    con, cfg: Config, texto: str, ahora: datetime, chat_id, imagen: bytes | None = None
+) -> str:
     """Trata un mensaje que no es una orden como una cita nueva."""
     clave = _clave_chat(chat_id)
     pendiente = _pendientes.get(clave)
 
     if pendiente is not None:
-        if _primera_palabra(texto) in ("sí", "si", "s"):
+        if imagen is None and _primera_palabra(texto) in ("sí", "si", "s"):
             db.guardar_cita(con, pendiente)
             del _pendientes[clave]
             return _texto_cita_guardada(pendiente)
-        if _primera_palabra(texto) in ("no", "n"):
+        if imagen is None and _primera_palabra(texto) in ("no", "n"):
             del _pendientes[clave]
             return NO_GUARDADA
-        # Si escribe otra cosa, se entiende como una cita nueva.
+        # Si escribe otra cosa o manda una foto, se entiende como una cita nueva.
         del _pendientes[clave]
 
     if cfg.ia_proveedor in ("", "ninguno"):
         return IA_NO_ACTIVADA
 
     try:
-        propuesta = extraer_cita(texto, cfg, ahora=ahora)
+        propuesta = extraer_cita(texto, cfg, ahora=ahora, imagen=imagen)
     except (IANoDisponible, ErrorExtraccion):
-        return IA_FALLO
+        return NO_LEIDO_PAPEL if imagen is not None else IA_FALLO
 
     if propuesta.faltan_datos:
-        return FALTAN_DATOS
+        return NO_LEIDO_PAPEL if imagen is not None else FALTAN_DATOS
 
     cita = Cita(
         titulo=propuesta.titulo,
@@ -176,11 +182,22 @@ def _responder_frase(con, cfg: Config, texto: str, ahora: datetime, chat_id) -> 
 
 
 def responder(
-    con, cfg: Config, texto: str, ahora: datetime | None = None, chat_id=None
+    con,
+    cfg: Config,
+    texto: str,
+    ahora: datetime | None = None,
+    chat_id=None,
+    imagen: bytes | None = None,
 ) -> str:
-    """Devuelve la respuesta a un mensaje. Guarda la tensión o la cita si hace falta."""
+    """Devuelve la respuesta a un mensaje. Guarda la tensión o la cita si hace falta.
+
+    'imagen' son los bytes de una foto del papel de la cita, si la hay.
+    """
     if ahora is None:
         ahora = ahora_local(cfg)
+
+    if imagen is not None:
+        return _responder_frase(con, cfg, texto, ahora, chat_id, imagen=imagen)
 
     partes = texto.strip().split()
     orden = partes[0].lower() if partes else ""
