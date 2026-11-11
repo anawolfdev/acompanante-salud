@@ -121,7 +121,7 @@ def test_tension_con_letras_avisa(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(con, cfg, "/tension 130 85 alto")
     con.close()
-    assert "números enteros" in respuesta
+    assert "con números" in respuesta
     assert "/tension 130 85 72" in respuesta
 
 

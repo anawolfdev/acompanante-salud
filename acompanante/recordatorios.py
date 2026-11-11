@@ -72,7 +72,7 @@ def texto_aviso(cita: Cita, ahora: datetime, tipo: str = "") -> str:
         f"{hora_texto(cita.fecha_hora)}: {que}.",
     ]
     if tipo == "vispera":
-        lineas.append("Desde ahora, no comas nada.")
+        lineas.append("No comas nada más hasta después de la cita.")
     if cita.lugar:
         lineas.append(f"Dónde: {cita.lugar}.")
     if cita.preparacion:
