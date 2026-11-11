@@ -27,13 +27,13 @@ NO_ENTENDIDO = "No te he entendido. Escribe /ayuda para ver lo que sé hacer."
 
 TEXTO_TENSION = "Para apuntar la tensión escribe: /tension 130 85 72"
 TEXTO_NUMEROS = (
-    "La tensión y el pulso tienen que ser números enteros. "
+    "Escribe la tensión y el pulso con números. "
     "Por ejemplo: /tension 130 85 72"
 )
 
 IA_NO_ACTIVADA = (
-    "Apuntar citas con una frase no está activada.\n"
-    "Pídeselo a la persona que cuida de la aplicación.\n"
+    "Todavía no puedo apuntar citas si me las escribes con una frase.\n"
+    "Avisa a la persona que se encarga de esta aplicación.\n"
     "Mientras tanto, puedes escribir /ayuda."
 )
 IA_FALLO = (

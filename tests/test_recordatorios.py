@@ -75,7 +75,7 @@ def test_aviso_vispera_con_ayunas_cuando_toca():
     assert avisos[0].tipo == "vispera"
     texto = avisos[0].texto
     assert "Mañana, jueves 12 de noviembre, a las 8:30: Analítica de sangre." in texto
-    assert "Desde ahora, no comas nada." in texto
+    assert "No comas nada más hasta después de la cita." in texto
     assert "Deja preparado:" in texto
     assert "1. Ve en ayunas." in texto
 
@@ -174,7 +174,7 @@ def test_enviar_aviso_vispera_no_repite(cfg):
     assert len(enviar_avisos(con, buzon, momento, cfg)) == 1
     assert len(enviar_avisos(con, buzon, momento, cfg)) == 0
     assert len(buzon.mensajes) == 1
-    assert "Desde ahora, no comas nada." in buzon.mensajes[0]
+    assert "No comas nada más hasta después de la cita." in buzon.mensajes[0]
 
 
 def test_simular_no_apunta_nada(cfg):
