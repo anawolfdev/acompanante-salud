@@ -13,7 +13,7 @@ class IAFalsa:
         self.preguntas = []
 
     def preguntar(self, texto, imagen=None, tipo_imagen="image/jpeg", sistema=None):
-        self.preguntas.append((texto, sistema))
+        self.preguntas.append((texto, imagen, sistema))
         return self.respuesta
 
 
@@ -45,10 +45,39 @@ def test_extrae_la_frase_de_ejemplo():
     assert propuesta.preparacion == ["Ve en ayunas"]
     assert propuesta.faltan_datos is False
 
-    pregunta, sistema = ia.preguntas[0]
+    pregunta, imagen, sistema = ia.preguntas[0]
     assert "analítica el 12 de noviembre a las 8:30" in pregunta
     assert "miércoles 11 de noviembre de 2026" in pregunta
+    assert imagen is None
     assert "JSON" in sistema
+
+
+def test_extrae_la_cita_de_una_foto():
+    ia = IAFalsa(
+        json.dumps(
+            {
+                "titulo": "Analítica de sangre",
+                "tipo": "analitica",
+                "fecha": "2026-11-12",
+                "hora": "08:30",
+                "lugar": "Centro de salud",
+                "preparacion": ["Ve en ayunas"],
+            }
+        )
+    )
+
+    propuesta = extraer_cita(
+        "",
+        Config(),
+        ahora=datetime(2026, 11, 11, 10, 0),
+        cliente=ia,
+        imagen=b"\xff\xd8foto",
+    )
+
+    assert propuesta.fecha_hora == datetime(2026, 11, 12, 8, 30)
+    pregunta, imagen, _sistema = ia.preguntas[0]
+    assert imagen == b"\xff\xd8foto"
+    assert "foto del papel de la cita" in pregunta
 
 
 def test_entiende_json_dentro_de_un_bloque_de_codigo():
