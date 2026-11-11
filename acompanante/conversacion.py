@@ -9,7 +9,7 @@ from __future__ import annotations
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from acompanante import db
+from acompanante import acciones, db
 from acompanante.config import Config
 from acompanante.extraer import ErrorExtraccion, extraer_cita
 from acompanante.ia import IANoDisponible
@@ -19,13 +19,19 @@ from acompanante.textos import fecha_larga, hora_texto
 AYUDA = (
     "Puedo hacer estas cosas:\n"
     "1. /proximas: ver tus próximas 5 citas.\n"
-    "2. /tension 130 85 72: apuntar una toma de tensión.\n"
-    "3. /ayuda: volver a ver esta ayuda."
+    "2. /citas: ver todas tus citas futuras, con su número.\n"
+    "3. /borrar 3: borrar la cita con ese número.\n"
+    "4. /tension 130 85 72: apuntar una toma de tensión.\n"
+    "5. /ayuda: volver a ver esta ayuda."
 )
 
 NO_ENTENDIDO = "No te he entendido. Escribe /ayuda para ver lo que sé hacer."
 
-TEXTO_TENSION = "Para apuntar la tensión escribe: /tension 130 85 72"
+TEXTO_TENSION = (
+    "Para apuntar la tensión escribe: /tension 130 85 72. "
+    "El primer número es la tensión alta, el segundo la baja y el tercero, "
+    "si quieres, el pulso."
+)
 TEXTO_NUMEROS = (
     "Escribe la tensión y el pulso con números. "
     "Por ejemplo: /tension 130 85 72"
@@ -52,10 +58,21 @@ NO_LEIDO_PAPEL = (
     "No consigo leer bien el papel.\n"
     "Prueba con más luz, o escríbeme la cita."
 )
+PREGUNTA_BORRAR = "¿La borro? Responde sí o no."
+NO_BORRADA = "No la he borrado. No se ha borrado nada."
+CITA_BORRADA = "Cita borrada."
+BORRAR_SIN_NUMERO = (
+    "No sé qué cita quieres borrar.\n"
+    "Escribe el número después de /borrar. Por ejemplo: /borrar 3\n"
+    "Para ver los números, escribe /citas."
+)
 
 # Citas propuestas que esperan un "sí" o un "no". Se guardan en memoria
 # porque solo hay una persona usando el bot.
 _pendientes: dict[str, Cita] = {}
+
+# Citas que esperan un "sí" o un "no" para borrarse.
+_borrados_pendientes: dict[str, Cita] = {}
 
 
 def ahora_local(cfg: Config) -> datetime:
@@ -79,6 +96,31 @@ def _texto_proximas(citas) -> str:
         if cita.lugar:
             linea += f" ({cita.lugar})"
         lineas.append(linea)
+    return "\n".join(lineas)
+
+
+def _texto_citas(citas) -> str:
+    if not citas:
+        return "No tienes citas apuntadas."
+    lineas = ["Estas son todas tus citas futuras:"]
+    for cita in citas:
+        lineas.append(acciones.linea_cita(cita))
+    return "\n".join(lineas)
+
+
+def _texto_no_existe(numero: int) -> str:
+    return (
+        f"No hay ninguna cita con el número {numero}.\n"
+        "Escribe /citas para ver los números de tus citas."
+    )
+
+
+def _texto_borrado(cita: Cita) -> str:
+    lineas = [
+        "Vas a borrar esta cita:",
+        acciones.linea_cita(cita),
+        PREGUNTA_BORRAR,
+    ]
     return "\n".join(lineas)
 
 
@@ -141,11 +183,43 @@ def _clave_chat(chat_id) -> str:
     return "local" if chat_id is None else str(chat_id)
 
 
+def _responder_borrado(con, texto: str, chat_id) -> str:
+    clave = _clave_chat(chat_id)
+    _borrados_pendientes.pop(clave, None)
+    _pendientes.pop(clave, None)
+
+    partes = texto.strip().split()
+    if len(partes) < 2:
+        return BORRAR_SIN_NUMERO
+    try:
+        numero = int(partes[1])
+    except ValueError:
+        return BORRAR_SIN_NUMERO
+
+    try:
+        cita = acciones.cita_para_borrar(con, numero)
+    except ValueError:
+        return _texto_no_existe(numero)
+
+    _borrados_pendientes[clave] = cita
+    return _texto_borrado(cita)
+
+
 def _responder_frase(
     con, cfg: Config, texto: str, ahora: datetime, chat_id, imagen: bytes | None = None
 ) -> str:
     """Trata un mensaje que no es una orden como una cita nueva."""
     clave = _clave_chat(chat_id)
+
+    pendiente_borrado = _borrados_pendientes.pop(clave, None)
+    if pendiente_borrado is not None:
+        if imagen is None and _primera_palabra(texto) in ("sí", "si", "s"):
+            acciones.borrar_cita(con, pendiente_borrado)
+            return CITA_BORRADA
+        if imagen is None and _primera_palabra(texto) in ("no", "n"):
+            return NO_BORRADA
+        # Si escribe otra cosa o manda una foto, se olvida el borrado.
+
     pendiente = _pendientes.get(clave)
 
     if pendiente is not None:
@@ -204,9 +278,17 @@ def responder(
     if orden.startswith("/") and "@" in orden:
         orden = orden.split("@", 1)[0]
 
+    if orden.startswith("/") and orden != "/borrar":
+        _borrados_pendientes.pop(_clave_chat(chat_id), None)
+
     if orden == "/proximas":
         citas = sorted(db.listar_citas(con, desde=ahora), key=lambda cita: cita.fecha_hora)[:5]
         return _texto_proximas(citas)
+    if orden == "/citas":
+        citas = sorted(db.listar_citas(con, desde=ahora), key=lambda cita: cita.fecha_hora)
+        return _texto_citas(citas)
+    if orden == "/borrar":
+        return _responder_borrado(con, texto, chat_id)
     if orden == "/tension":
         return _apuntar_tension(con, cfg, partes, ahora)
     if orden == "/ayuda":

@@ -7,7 +7,7 @@ import time
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
-from acompanante import db
+from acompanante import acciones, db
 from acompanante.bot import atender_mensajes
 from acompanante.config import Config, cargar_env, leer_config
 from acompanante.modelos import TIPOS, Cita, Tarea, Tension
@@ -33,13 +33,6 @@ from acompanante.textos import (
 
 def ahora_local(cfg: Config) -> datetime:
     return datetime.now(ZoneInfo(cfg.zona_horaria)).replace(tzinfo=None, second=0, microsecond=0)
-
-
-def _linea_cita(cita: Cita) -> str:
-    texto = f"[{cita.id}] {fecha_larga(cita.fecha_hora)} a las {hora_texto(cita.fecha_hora)}: {cita.titulo}"
-    if cita.lugar:
-        texto += f" ({cita.lugar})"
-    return texto
 
 
 def _linea_tarea(tarea: Tarea) -> str:
@@ -94,21 +87,21 @@ def orden_nueva_cita(args, cfg: Config) -> int:
     con = db.conectar(cfg.ruta_bd)
     db.guardar_cita(con, cita)
     print("Cita guardada:")
-    print(_linea_cita(cita))
+    print(acciones.linea_cita(cita))
     return 0
 
 
 def orden_borrar_cita(args, cfg: Config) -> int:
     con = db.conectar(cfg.ruta_bd)
-    cita = db.obtener_cita(con, args.id)
+    cita = acciones.cita_para_borrar(con, args.id)
     print("Vas a borrar esta cita:")
-    print(_linea_cita(cita))
+    print(acciones.linea_cita(cita))
     print("¿Seguro que quieres borrar esta cita? (s/n)")
     respuesta = input()
     if respuesta.strip().lower() not in ("s", "si", "sí"):
         print("No se ha borrado nada.")
         return 0
-    db.borrar_cita(con, cita.id)
+    acciones.borrar_cita(con, cita)
     print("Cita borrada.")
     return 0
 
@@ -144,7 +137,7 @@ def orden_cambiar_cita(args, cfg: Config) -> int:
         db.borrar_avisos_de_cita(con, cita.id)
     db.actualizar_cita(con, nueva)
     print("Cita cambiada:")
-    print(_linea_cita(nueva))
+    print(acciones.linea_cita(nueva))
     return 0
 
 
@@ -157,7 +150,7 @@ def orden_citas(args, cfg: Config) -> int:
         return 0
     print(f"Tienes {len(citas)} cita(s):")
     for cita in citas:
-        print(_linea_cita(cita))
+        print(acciones.linea_cita(cita))
     return 0
 
 
@@ -335,7 +328,7 @@ def orden_demo(args, cfg: Config) -> int:
     con = db.conectar(cfg.ruta_bd)
     for cita in ejemplos:
         db.guardar_cita(con, cita)
-        print(f"Apuntada: {_linea_cita(cita)}")
+        print(f"Apuntada: {acciones.linea_cita(cita)}")
     primera = ejemplos[0]
     print()
     nombres = {
