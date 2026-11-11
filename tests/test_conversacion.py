@@ -20,8 +20,10 @@ from acompanante.modelos import Cita
 @pytest.fixture(autouse=True)
 def limpiar_citas_pendientes():
     conversacion._pendientes.clear()
+    conversacion._borrados_pendientes.clear()
     yield
     conversacion._pendientes.clear()
+    conversacion._borrados_pendientes.clear()
 
 
 def propuesta_de_ejemplo():
@@ -96,6 +98,112 @@ def test_proximas_sin_citas(cfg):
     assert respuesta == "No tienes citas apuntadas."
 
 
+def test_citas_ensena_todas_las_futuras_con_su_numero(cfg):
+    con = guardar_citas(cfg)
+    respuesta = responder(con, cfg, "/citas", ahora=datetime(2026, 11, 9, 9, 0))
+    con.close()
+
+    lineas = respuesta.splitlines()
+    assert lineas[0] == "Estas son todas tus citas futuras:"
+    assert len(lineas) == 7
+    assert lineas[1].startswith("[2] martes 10 de noviembre a las 8:30: Cita 1")
+    assert lineas[6].startswith("[7] domingo 15 de noviembre a las 8:30: Cita 6")
+    assert "Cita pasada" not in respuesta
+
+
+def test_citas_ordena_por_fecha_y_hora(cfg, monkeypatch):
+    con = db.conectar(cfg.ruta_bd)
+    tarde = Cita(id=3, titulo="Tarde", fecha_hora=datetime(2026, 11, 12, 17, 0))
+    temprano = Cita(id=2, titulo="Temprano", fecha_hora=datetime(2026, 11, 12, 8, 30))
+    otro_dia = Cita(id=1, titulo="Otro día", fecha_hora=datetime(2026, 11, 10, 9, 0))
+    monkeypatch.setattr(
+        "acompanante.conversacion.db.listar_citas",
+        lambda con, desde=None: [tarde, otro_dia, temprano],
+    )
+
+    respuesta = responder(con, cfg, "/citas", ahora=datetime(2026, 11, 9, 9, 0))
+    con.close()
+
+    lineas = respuesta.splitlines()
+    assert lineas[1].endswith("Otro día")
+    assert lineas[2].endswith("Temprano")
+    assert lineas[3].endswith("Tarde")
+
+
+def test_citas_sin_citas(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/citas", ahora=datetime(2026, 11, 9, 9, 0))
+    con.close()
+    assert respuesta == "No tienes citas apuntadas."
+
+
+def guardar_cita_de_ejemplo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    cita = Cita(
+        titulo="Analítica",
+        fecha_hora=datetime(2026, 11, 12, 8, 30),
+        lugar="Centro de salud",
+    )
+    db.guardar_cita(con, cita)
+    return con, cita
+
+
+def test_borrar_ensena_la_cita_y_pide_confirmacion(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    respuesta = responder(
+        con, cfg, f"/borrar {cita.id}", ahora=datetime(2026, 11, 9, 9, 0)
+    )
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "Vas a borrar esta cita:" in respuesta
+    assert f"[{cita.id}] jueves 12 de noviembre a las 8:30: Analítica (Centro de salud)" in respuesta
+    assert "¿La borro? Responde sí o no." in respuesta
+    assert len(citas) == 1
+
+
+def test_borrar_despues_de_decir_si_la_quita(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    responder(con, cfg, f"/borrar {cita.id}", ahora=datetime(2026, 11, 9, 9, 0))
+    respuesta = responder(con, cfg, "sí", ahora=datetime(2026, 11, 9, 9, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == "Cita borrada."
+    assert citas == []
+
+
+def test_borrar_despues_de_decir_no_no_borra(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    responder(con, cfg, f"/borrar {cita.id}", ahora=datetime(2026, 11, 9, 9, 0))
+    respuesta = responder(con, cfg, "no", ahora=datetime(2026, 11, 9, 9, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == "No la he borrado. No se ha borrado nada."
+    assert len(citas) == 1
+
+
+def test_borrar_numero_que_no_existe_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/borrar 7")
+    con.close()
+
+    assert respuesta == (
+        "No hay ninguna cita con el número 7.\n"
+        "Escribe /citas para ver los números de tus citas."
+    )
+
+
+def test_borrar_sin_numero_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/borrar")
+    con.close()
+
+    assert "No sé qué cita quieres borrar." in respuesta
+    assert "/borrar 3" in respuesta
+
+
 def test_tension_guarda_la_toma_y_responde(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(
@@ -136,17 +244,23 @@ def test_tension_incompleta_avisa(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(con, cfg, "/tension 130")
     con.close()
-    assert respuesta == "Para apuntar la tensión escribe: /tension 130 85 72"
+    assert respuesta == (
+        "Para apuntar la tensión escribe: /tension 130 85 72. "
+        "El primer número es la tensión alta, el segundo la baja y el tercero, "
+        "si quieres, el pulso."
+    )
 
 
-def test_ayuda_tiene_cuatro_lineas_y_las_ordenes(cfg):
+def test_ayuda_tiene_seis_lineas_y_las_ordenes(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(con, cfg, "/ayuda")
     con.close()
 
     assert respuesta == AYUDA
-    assert len(respuesta.splitlines()) == 4
+    assert len(respuesta.splitlines()) == 6
     assert "/proximas" in respuesta
+    assert "/citas" in respuesta
+    assert "/borrar" in respuesta
     assert "/tension" in respuesta
     assert "/ayuda" in respuesta
 
