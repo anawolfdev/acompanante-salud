@@ -18,6 +18,6 @@ def atender_mensajes(con, cfg: Config, offset: int | None = None, abrir=None) ->
         offset = mensaje["update_id"] + 1
         if not debe_responder(mensaje["chat_id"], cfg):
             continue
-        respuesta = responder(con, cfg, mensaje["texto"])
+        respuesta = responder(con, cfg, mensaje["texto"], chat_id=mensaje["chat_id"])
         NotificadorTelegram(cfg.telegram_token, str(mensaje["chat_id"])).enviar(respuesta)
     return offset

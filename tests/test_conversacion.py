@@ -1,13 +1,42 @@
 from datetime import datetime
 
-from acompanante import db
+import pytest
+
+from acompanante import conversacion, db
 from acompanante.conversacion import (
     AYUDA,
+    FALTAN_DATOS,
+    IA_NO_ACTIVADA,
     NO_ENTENDIDO,
     debe_responder,
     responder,
 )
+from acompanante.extraer import PropuestaCita
+from acompanante.ia import IANoDisponible
 from acompanante.modelos import Cita
+
+
+@pytest.fixture(autouse=True)
+def limpiar_citas_pendientes():
+    conversacion._pendientes.clear()
+    yield
+    conversacion._pendientes.clear()
+
+
+def propuesta_de_ejemplo():
+    return PropuestaCita(
+        titulo="Analítica de sangre",
+        tipo="analitica",
+        fecha_hora=datetime(2026, 11, 12, 8, 30),
+        lugar="Centro de salud",
+        preparacion=["Ve en ayunas"],
+    )
+
+
+def activar_ia(cfg):
+    cfg.ia_proveedor = "gemini"
+    cfg.ia_api_key = "clave-de-prueba"
+    cfg.ia_modelo = "modelo-de-prueba"
 
 
 def guardar_citas(cfg):
@@ -121,11 +150,121 @@ def test_ayuda_tiene_cuatro_lineas_y_las_ordenes(cfg):
     assert "/ayuda" in respuesta
 
 
-def test_cualquier_otra_cosa_no_se_entiende(cfg):
+def test_una_orden_desconocida_no_se_entiende(cfg):
     con = db.conectar(cfg.ruta_bd)
-    respuesta = responder(con, cfg, "hola, ¿qué tal?")
+    respuesta = responder(con, cfg, "/inventada")
     con.close()
     assert respuesta == NO_ENTENDIDO
+
+
+def test_una_frase_sin_ia_avisa_de_que_no_esta_activada(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "analítica el 12 de noviembre a las 8:30")
+    con.close()
+    assert respuesta == IA_NO_ACTIVADA
+
+
+def test_una_frase_propone_la_cita_y_pide_confirmacion(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(
+        con,
+        cfg,
+        "analítica el 12 de noviembre a las 8:30 en el centro de salud, en ayunas",
+        ahora=datetime(2026, 11, 11, 10, 0),
+    )
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "He entendido esta cita:" in respuesta
+    assert "Analítica de sangre" in respuesta
+    assert "jueves 12 de noviembre a las 8:30" in respuesta
+    assert "Lugar: Centro de salud" in respuesta
+    assert "1. Ve en ayunas" in respuesta
+    assert "¿La guardo? Responde sí o no." in respuesta
+    assert citas == []
+
+
+def test_responde_si_y_guarda_la_cita(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    responder(
+        con,
+        cfg,
+        "analítica el 12 de noviembre a las 8:30 en el centro de salud, en ayunas",
+        ahora=datetime(2026, 11, 11, 10, 0),
+    )
+    respuesta = responder(con, cfg, "sí", ahora=datetime(2026, 11, 11, 10, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "Cita guardada:" in respuesta
+    assert len(citas) == 1
+    assert citas[0].titulo == "Analítica de sangre"
+    assert citas[0].fecha_hora == datetime(2026, 11, 12, 8, 30)
+    assert citas[0].lugar == "Centro de salud"
+    assert citas[0].preparacion == ["Ve en ayunas"]
+
+
+def test_responde_no_y_no_guarda_nada(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None: propuesta_de_ejemplo(),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    responder(
+        con,
+        cfg,
+        "analítica el 12 de noviembre a las 8:30 en el centro de salud, en ayunas",
+        ahora=datetime(2026, 11, 11, 10, 0),
+    )
+    respuesta = responder(con, cfg, "no", ahora=datetime(2026, 11, 11, 10, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == "No la he guardado. No se ha apuntado nada."
+    assert citas == []
+
+
+def test_si_falta_la_fecha_o_la_hora_se_pregunta(cfg, monkeypatch):
+    activar_ia(cfg)
+    monkeypatch.setattr(
+        "acompanante.conversacion.extraer_cita",
+        lambda texto, cfg, ahora=None: PropuestaCita(
+            titulo="Analítica de sangre", tipo="analitica"
+        ),
+    )
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "analítica de sangre", ahora=datetime(2026, 11, 11, 10, 0))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == FALTAN_DATOS
+    assert citas == []
+
+
+def test_si_la_ia_falla_avisa_sin_jerga(cfg, monkeypatch):
+    activar_ia(cfg)
+
+    def falla(texto, cfg, ahora=None):
+        raise IANoDisponible("El proveedor ha fallado")
+
+    monkeypatch.setattr("acompanante.conversacion.extraer_cita", falla)
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "analítica el 12 de noviembre a las 8:30")
+    con.close()
+
+    assert "no puedo entender la frase" in respuesta
+    assert "proveedor" not in respuesta
 
 
 def test_debe_responder_solo_al_chat_autorizado(cfg):

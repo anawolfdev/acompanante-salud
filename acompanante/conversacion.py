@@ -11,7 +11,9 @@ from zoneinfo import ZoneInfo
 
 from acompanante import db
 from acompanante.config import Config
-from acompanante.modelos import Tension
+from acompanante.extraer import ErrorExtraccion, extraer_cita
+from acompanante.ia import IANoDisponible
+from acompanante.modelos import Cita, Tension
 from acompanante.textos import fecha_larga, hora_texto
 
 AYUDA = (
@@ -28,6 +30,28 @@ TEXTO_NUMEROS = (
     "La tensión y el pulso tienen que ser números enteros. "
     "Por ejemplo: /tension 130 85 72"
 )
+
+IA_NO_ACTIVADA = (
+    "Apuntar citas con una frase no está activada.\n"
+    "Pídeselo a la persona que cuida de la aplicación.\n"
+    "Mientras tanto, puedes escribir /ayuda."
+)
+IA_FALLO = (
+    "Ahora mismo no puedo entender la frase.\n"
+    "Inténtalo otra vez en un momento.\n"
+    "También puedes escribir /ayuda."
+)
+FALTAN_DATOS = (
+    "No sé el día o la hora de la cita.\n"
+    "Escríbela otra vez con el día y la hora.\n"
+    "Por ejemplo: analítica el 12/11/2026 a las 8:30."
+)
+PREGUNTA_GUARDAR = "¿La guardo? Responde sí o no."
+NO_GUARDADA = "No la he guardado. No se ha apuntado nada."
+
+# Citas propuestas que esperan un "sí" o un "no". Se guardan en memoria
+# porque solo hay una persona usando el bot.
+_pendientes: dict[str, Cita] = {}
 
 
 def ahora_local(cfg: Config) -> datetime:
@@ -76,8 +100,85 @@ def _apuntar_tension(con, cfg: Config, partes: list[str], ahora: datetime) -> st
     return respuesta
 
 
-def responder(con, cfg: Config, texto: str, ahora: datetime | None = None) -> str:
-    """Devuelve la respuesta a un mensaje. Guarda la tensión si hace falta."""
+def _texto_propuesta(cita: Cita) -> str:
+    lineas = [
+        "He entendido esta cita:",
+        cita.titulo,
+        f"{fecha_larga(cita.fecha_hora)} a las {hora_texto(cita.fecha_hora)}",
+    ]
+    if cita.lugar:
+        lineas.append(f"Lugar: {cita.lugar}")
+    if cita.preparacion:
+        lineas.append("Preparación:")
+        for posicion, paso in enumerate(cita.preparacion, start=1):
+            lineas.append(f"{posicion}. {paso}")
+    lineas.append(PREGUNTA_GUARDAR)
+    return "\n".join(lineas)
+
+
+def _texto_cita_guardada(cita: Cita) -> str:
+    lineas = [
+        "Cita guardada:",
+        f"{fecha_larga(cita.fecha_hora)} a las {hora_texto(cita.fecha_hora)}: {cita.titulo}",
+    ]
+    if cita.lugar:
+        lineas.append(f"Lugar: {cita.lugar}")
+    return "\n".join(lineas)
+
+
+def _primera_palabra(texto: str) -> str:
+    limpio = texto.strip().lower()
+    if not limpio:
+        return ""
+    return limpio.split()[0].strip(".,;:!¡¿?\"'")
+
+
+def _clave_chat(chat_id) -> str:
+    return "local" if chat_id is None else str(chat_id)
+
+
+def _responder_frase(con, cfg: Config, texto: str, ahora: datetime, chat_id) -> str:
+    """Trata un mensaje que no es una orden como una cita nueva."""
+    clave = _clave_chat(chat_id)
+    pendiente = _pendientes.get(clave)
+
+    if pendiente is not None:
+        if _primera_palabra(texto) in ("sí", "si", "s"):
+            db.guardar_cita(con, pendiente)
+            del _pendientes[clave]
+            return _texto_cita_guardada(pendiente)
+        if _primera_palabra(texto) in ("no", "n"):
+            del _pendientes[clave]
+            return NO_GUARDADA
+        # Si escribe otra cosa, se entiende como una cita nueva.
+        del _pendientes[clave]
+
+    if cfg.ia_proveedor in ("", "ninguno"):
+        return IA_NO_ACTIVADA
+
+    try:
+        propuesta = extraer_cita(texto, cfg, ahora=ahora)
+    except (IANoDisponible, ErrorExtraccion):
+        return IA_FALLO
+
+    if propuesta.faltan_datos:
+        return FALTAN_DATOS
+
+    cita = Cita(
+        titulo=propuesta.titulo,
+        fecha_hora=propuesta.fecha_hora,
+        tipo=propuesta.tipo,
+        lugar=propuesta.lugar,
+        preparacion=propuesta.preparacion,
+    )
+    _pendientes[clave] = cita
+    return _texto_propuesta(cita)
+
+
+def responder(
+    con, cfg: Config, texto: str, ahora: datetime | None = None, chat_id=None
+) -> str:
+    """Devuelve la respuesta a un mensaje. Guarda la tensión o la cita si hace falta."""
     if ahora is None:
         ahora = ahora_local(cfg)
 
@@ -93,4 +194,6 @@ def responder(con, cfg: Config, texto: str, ahora: datetime | None = None) -> st
         return _apuntar_tension(con, cfg, partes, ahora)
     if orden == "/ayuda":
         return AYUDA
-    return NO_ENTENDIDO
+    if orden.startswith("/") or not texto.strip():
+        return NO_ENTENDIDO
+    return _responder_frase(con, cfg, texto, ahora, chat_id)
