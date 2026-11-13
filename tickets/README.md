@@ -19,5 +19,6 @@ Para tener una demo que enseñar bastan **ACS-001, ACS-002 y ACS-003** (unas 2 h
 | [ACS-011](ACS-011-foto-del-papel.md) | Foto del papel de la cita | 2 h |
 | [ACS-012](ACS-012-accesibilidad-y-demo.md) | Revisión de accesibilidad y demo | 1 h 30 min |
 | [ACS-013](ACS-013-citas-y-borrar-en-el-bot.md) | Ver todas las citas y borrar una desde el bot | 1 h |
+| [ACS-014](ACS-014-proximas-y-cambiar.md) | Quitar /proximas, cambiar y añadir citas desde el bot | 1 h 30 min |
 
 Tiempo total aproximado: unas 16 horas. Con modelos gratis puede tardar algo más: es normal.
