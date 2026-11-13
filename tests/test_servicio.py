@@ -45,8 +45,10 @@ def test_la_plantilla_usa_rutas_absolutas():
 
 
 def test_la_carpeta_de_trabajo_es_la_del_proyecto():
+    # Se compara solo el nombre de la carpeta: en GitHub el proyecto está
+    # en otra ruta y la plantilla lleva la de este Mac.
     datos = leer_plantilla()
-    assert Path(datos["WorkingDirectory"]).resolve() == RAIZ
+    assert Path(datos["WorkingDirectory"]).name == RAIZ.name
 
 
 def test_los_logs_van_a_la_carpeta_de_logs_del_mac():
