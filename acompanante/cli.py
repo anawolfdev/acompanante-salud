@@ -18,7 +18,6 @@ from acompanante.notificador import (
     consultar_chats,
     crear_notificador,
 )
-from acompanante.plantillas import preparacion_sugerida
 from acompanante.recordatorios import enviar_avisos, momentos_de_aviso, texto_aviso
 from acompanante.textos import (
     dias_texto,
@@ -73,16 +72,14 @@ def orden_iniciar(args, cfg: Config) -> int:
 
 
 def orden_nueva_cita(args, cfg: Config) -> int:
-    preparacion = args.preparar
-    if not preparacion:
-        preparacion = [] if args.sin_sugerencias else preparacion_sugerida(args.tipo)
-    cita = Cita(
+    cita = acciones.crear_cita(
         titulo=args.titulo,
         fecha_hora=datetime.combine(parsear_fecha(args.fecha), parsear_hora(args.hora)),
         tipo=args.tipo,
         lugar=args.lugar or "",
-        preparacion=preparacion,
+        preparacion=args.preparar,
         notas=args.notas or "",
+        sin_sugerencias=args.sin_sugerencias,
     )
     con = db.conectar(cfg.ruta_bd)
     db.guardar_cita(con, cita)
@@ -133,9 +130,7 @@ def orden_cambiar_cita(args, cfg: Config) -> int:
         notas=args.notas if args.notas is not None else cita.notas,
         id=cita.id,
     )
-    if nueva.fecha_hora != cita.fecha_hora:
-        db.borrar_avisos_de_cita(con, cita.id)
-    db.actualizar_cita(con, nueva)
+    nueva = acciones.cambiar_cita(con, cita, nueva)
     print("Cita cambiada:")
     print(acciones.linea_cita(nueva))
     return 0

@@ -21,9 +21,11 @@ from acompanante.modelos import Cita
 def limpiar_citas_pendientes():
     conversacion._pendientes.clear()
     conversacion._borrados_pendientes.clear()
+    conversacion._cambios_pendientes.clear()
     yield
     conversacion._pendientes.clear()
     conversacion._borrados_pendientes.clear()
+    conversacion._cambios_pendientes.clear()
 
 
 def propuesta_de_ejemplo():
@@ -60,42 +62,11 @@ def guardar_citas(cfg):
     return con
 
 
-def test_proximas_ensena_solo_las_cinco_siguientes(cfg):
-    con = guardar_citas(cfg)
-    respuesta = responder(con, cfg, "/proximas", ahora=datetime(2026, 11, 9, 9, 0))
-    con.close()
-
-    assert respuesta.startswith("Tus próximas citas:")
-    assert "1. martes 10 de noviembre a las 8:30: Cita 1 (Centro de salud)" in respuesta
-    assert "5. sábado 14 de noviembre a las 8:30: Cita 5 (Centro de salud)" in respuesta
-    assert "Cita 6" not in respuesta
-    assert "Cita pasada" not in respuesta
-
-
-def test_proximas_ordena_por_fecha_y_hora(cfg, monkeypatch):
-    con = db.conectar(cfg.ruta_bd)
-    tarde = Cita(titulo="Tarde", fecha_hora=datetime(2026, 11, 12, 17, 0))
-    temprano = Cita(titulo="Temprano", fecha_hora=datetime(2026, 11, 12, 8, 30))
-    otro_dia = Cita(titulo="Otro día", fecha_hora=datetime(2026, 11, 10, 9, 0))
-    monkeypatch.setattr(
-        "acompanante.conversacion.db.listar_citas",
-        lambda con, desde=None: [tarde, otro_dia, temprano],
-    )
-
-    respuesta = responder(con, cfg, "/proximas", ahora=datetime(2026, 11, 9, 9, 0))
-    con.close()
-
-    lineas = respuesta.splitlines()
-    assert lineas[1].endswith("Otro día")
-    assert lineas[2].endswith("Temprano")
-    assert lineas[3].endswith("Tarde")
-
-
-def test_proximas_sin_citas(cfg):
+def test_proximas_avisa_que_ahora_se_llama_citas(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(con, cfg, "/proximas", ahora=datetime(2026, 11, 9, 9, 0))
     con.close()
-    assert respuesta == "No tienes citas apuntadas."
+    assert respuesta == "Ahora se llama /citas"
 
 
 def test_citas_ensena_todas_las_futuras_con_su_numero(cfg):
@@ -135,6 +106,107 @@ def test_citas_sin_citas(cfg):
     respuesta = responder(con, cfg, "/citas", ahora=datetime(2026, 11, 9, 9, 0))
     con.close()
     assert respuesta == "No tienes citas apuntadas."
+
+
+def test_anadir_ensena_la_cita_y_pide_confirmacion(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(
+        con, cfg, "/añadir Analítica | 12/11/2026 8:30 | Centro de salud"
+    )
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "He entendido esta cita:" in respuesta
+    assert "Analítica" in respuesta
+    assert "jueves 12 de noviembre a las 8:30" in respuesta
+    assert "Lugar: Centro de salud" in respuesta
+    assert "1. Lleva la tarjeta sanitaria" in respuesta
+    assert "¿La guardo? Responde sí o no." in respuesta
+    assert citas == []
+
+
+def test_anadir_despues_de_decir_si_guarda_la_cita(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    responder(con, cfg, "/añadir Analítica | 12/11/2026 8:30 | Centro de salud")
+    respuesta = responder(con, cfg, "sí")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "Cita guardada:" in respuesta
+    assert "jueves 12 de noviembre a las 8:30: Analítica" in respuesta
+    assert "Lugar: Centro de salud" in respuesta
+    assert len(citas) == 1
+    assert citas[0].titulo == "Analítica"
+    assert citas[0].fecha_hora == datetime(2026, 11, 12, 8, 30)
+    assert citas[0].lugar == "Centro de salud"
+    assert citas[0].tipo == "cita"
+    assert citas[0].preparacion == [
+        "Lleva la tarjeta sanitaria",
+        "Lleva los informes o papeles que te hayan dado",
+    ]
+
+
+def test_anadir_despues_de_decir_no_no_guarda(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    responder(con, cfg, "/añadir Analítica | 12/11/2026 8:30 | Centro de salud")
+    respuesta = responder(con, cfg, "no")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == "No la he guardado. No se ha apuntado nada."
+    assert citas == []
+
+
+def test_anadir_sin_lugar_funciona(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/añadir Vacuna de la gripe | 13/11/2026 9:00")
+    assert "Lugar:" not in respuesta
+
+    responder(con, cfg, "sí")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert len(citas) == 1
+    assert citas[0].lugar == ""
+
+
+def test_anadir_fecha_mal_escrita_avisa_con_ejemplo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/añadir Analítica | mañana 8:30 | Centro de salud")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "No he entendido la fecha o la hora." in respuesta
+    assert "/añadir Analítica | 12/11/2026 8:30 | Centro de salud" in respuesta
+    assert citas == []
+
+
+def test_anadir_sin_datos_avisa_con_ejemplo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    for texto in (
+        "/añadir",
+        "/añadir Analítica 12/11/2026 8:30",
+        "/añadir | 12/11/2026 8:30",
+        "/añadir Analítica | | Centro de salud",
+    ):
+        respuesta = responder(con, cfg, texto)
+        assert "No sé qué cita quieres añadir o cuándo." in respuesta
+        assert "/añadir Analítica | 12/11/2026 8:30 | Centro de salud" in respuesta
+
+    citas = db.listar_citas(con)
+    con.close()
+    assert citas == []
+
+
+def test_anadir_se_olvida_si_se_escribe_otra_orden(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    responder(con, cfg, "/añadir Analítica | 12/11/2026 8:30 | Centro de salud")
+    responder(con, cfg, "/citas")
+    responder(con, cfg, "sí")
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert citas == []
 
 
 def guardar_cita_de_ejemplo(cfg):
@@ -204,6 +276,86 @@ def test_borrar_sin_numero_avisa(cfg):
     assert "/borrar 3" in respuesta
 
 
+def test_cambiar_ensena_la_cita_actual_y_la_nueva_y_pide_confirmacion(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    respuesta = responder(
+        con, cfg, f"/cambiar {cita.id} 13/11/2026 9:45", ahora=datetime(2026, 11, 9, 9, 0)
+    )
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert "Vas a cambiar esta cita:" in respuesta
+    assert f"[{cita.id}] jueves 12 de noviembre a las 8:30: Analítica (Centro de salud)" in respuesta
+    assert "Quedará así:" in respuesta
+    assert f"[{cita.id}] viernes 13 de noviembre a las 9:45: Analítica (Centro de salud)" in respuesta
+    assert "¿La cambio? Responde sí o no." in respuesta
+    assert citas[0].fecha_hora == datetime(2026, 11, 12, 8, 30)
+
+
+def test_cambiar_despues_de_decir_si_la_cambia(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    responder(con, cfg, f"/cambiar {cita.id} 13/11/2026 9:45", ahora=datetime(2026, 11, 9, 9, 0))
+    respuesta = responder(con, cfg, "sí", ahora=datetime(2026, 11, 9, 9, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta.startswith("Cita cambiada:")
+    assert f"[{cita.id}] viernes 13 de noviembre a las 9:45: Analítica (Centro de salud)" in respuesta
+    assert citas[0].fecha_hora == datetime(2026, 11, 13, 9, 45)
+    assert citas[0].titulo == "Analítica"
+    assert citas[0].lugar == "Centro de salud"
+
+
+def test_cambiar_despues_de_decir_no_no_cambia(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    responder(con, cfg, f"/cambiar {cita.id} 13/11/2026 9:45", ahora=datetime(2026, 11, 9, 9, 0))
+    respuesta = responder(con, cfg, "no", ahora=datetime(2026, 11, 9, 9, 1))
+    citas = db.listar_citas(con)
+    con.close()
+
+    assert respuesta == "No la he cambiado. No se ha cambiado nada."
+    assert citas[0].fecha_hora == datetime(2026, 11, 12, 8, 30)
+
+
+def test_cambiar_numero_que_no_existe_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/cambiar 7 13/11/2026 9:45")
+    con.close()
+
+    assert "No hay ninguna cita con el número 7." in respuesta
+    assert "Escribe /citas para ver los números de tus citas." in respuesta
+
+
+def test_cambiar_fecha_mal_escrita_avisa_con_ejemplo(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    respuesta = responder(con, cfg, f"/cambiar {cita.id} mañana 9:45")
+    con.close()
+
+    assert "No he entendido la fecha o la hora." in respuesta
+    assert "/cambiar 3 12/11/2026 8:30" in respuesta
+
+
+def test_cambiar_sin_datos_avisa_con_ejemplo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/cambiar")
+    con.close()
+
+    assert "No sé qué cita quieres cambiar o cuándo." in respuesta
+    assert "/cambiar 3 12/11/2026 8:30" in respuesta
+
+
+def test_cambiar_la_fecha_hace_que_los_avisos_vuelvan_a_salir(cfg):
+    con, cita = guardar_cita_de_ejemplo(cfg)
+    db.marcar_aviso_enviado(con, cita.id, "previo", datetime(2026, 11, 10, 10, 0))
+    assert db.aviso_enviado(con, cita.id, "previo") is True
+
+    responder(con, cfg, f"/cambiar {cita.id} 13/11/2026 9:45", ahora=datetime(2026, 11, 9, 9, 0))
+    responder(con, cfg, "sí", ahora=datetime(2026, 11, 9, 9, 1))
+
+    assert db.aviso_enviado(con, cita.id, "previo") is False
+    con.close()
+
+
 def test_tension_guarda_la_toma_y_responde(cfg):
     con = db.conectar(cfg.ruta_bd)
     respuesta = responder(
@@ -257,9 +409,11 @@ def test_ayuda_tiene_seis_lineas_y_las_ordenes(cfg):
     con.close()
 
     assert respuesta == AYUDA
-    assert len(respuesta.splitlines()) == 6
-    assert "/proximas" in respuesta
+    assert len(respuesta.splitlines()) == 7
+    assert "/proximas" not in respuesta
+    assert "/añadir" in respuesta
     assert "/citas" in respuesta
+    assert "/cambiar" in respuesta
     assert "/borrar" in respuesta
     assert "/tension" in respuesta
     assert "/ayuda" in respuesta
