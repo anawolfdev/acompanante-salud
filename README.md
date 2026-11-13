@@ -67,6 +67,57 @@ python -m acompanante avisos
 - `avisos --simular --ahora "…"` hace como si fuera ese día y esa hora, y te enseña el aviso sin mandarlo.
 - `avisos` manda los avisos que tocan ahora (por pantalla o por Telegram, según `CANAL` en el `.env`).
 
+## Que arranque solo al encender el Mac (solo macOS)
+
+Con esto no tienes que lanzar `vigilar` a mano. El Mac arranca el bot solo
+y lo vuelve a arrancar si se para.
+
+1. **Instálalo una vez.** Entra en la carpeta del proyecto y escribe:
+   ```
+   ./scripts/instalar-servicio.sh
+   ```
+   El script coge el python que tengas activo (`which python3`), rellena la
+   plantilla de `deploy/`, copia el archivo a `~/Library/LaunchAgents` y lo
+   pone en marcha. No hace falta nada más.
+
+2. **Comprueba que está funcionando.**
+   ```
+   launchctl list | grep acompanante
+   ```
+   Tiene que salir una línea con `com.anawolfdev.acompanante`.
+   En la primera columna hay un número: es el proceso del bot.
+   Si en la primera columna pone `-`, el bot no está arrancado ahora mismo.
+   Si no sale ninguna línea, el servicio no está instalado.
+
+3. **Mira los mensajes y los errores.**
+   ```
+   tail -f ~/Library/Logs/acompanante.log
+   tail -f ~/Library/Logs/acompanante-error.log
+   ```
+   El primero dice qué hace el bot. El segundo dice qué ha fallado.
+   Para dejar de mirar, pulsa Control + C (eso no para el bot).
+   También puedes abrir los dos archivos con la aplicación TextEdit.
+
+4. **Páralo y quítalo.**
+   ```
+   ./scripts/quitar-servicio.sh
+   ```
+   Para el bot y borra el arranque automático.
+   Tus citas y tus claves no se tocan.
+   Los logs se quedan en `~/Library/Logs` por si los necesitas.
+
+Cosas que conviene saber:
+
+- Si cambias el `.env` o el código, reinicia el servicio para que lo coja:
+  ```
+  launchctl kickstart -k gui/$(id -u)/com.anawolfdev.acompanante
+  ```
+- Si mueves la carpeta del proyecto, vuelve a ejecutar el instalador.
+- Si usas el entorno `.venv` del proyecto, actívalo antes de instalar.
+  El servicio usará ese python. Si borras `.venv`, vuelve a instalar.
+- No lances `python -m acompanante vigilar` a mano mientras el servicio
+  está funcionando: se pelearían por el mismo archivo de citas.
+
 ## Cómo trabajar con OpenCode
 
 1. Abre una terminal en la carpeta del proyecto y escribe `opencode`.
@@ -88,6 +139,8 @@ acompanante/        el código
   textos.py         fechas y horas en español
 tests/              las pruebas automáticas
 tickets/            el trabajo que falta, en orden
+deploy/             plantilla para que el bot arranque solo en el Mac
+scripts/            instalar y quitar ese arranque automático
 GUIA.md             la guía paso a paso desde cero
 docs/               hoja de ruta
 ```

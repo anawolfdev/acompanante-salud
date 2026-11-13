@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Plantilla del LaunchAgent del Acompanante de salud.
+
+  Esta plantilla es para macOS. Hace que "python -m acompanante vigilar"
+  arranque solo al encender el Mac y se vuelva a arrancar si se para.
+
+  No la copies a mano. Usa el script:
+      ./scripts/instalar-servicio.sh
+
+  El script cambia estas rutas por las de tu Mac antes de copiarla
+  a ~/Library/LaunchAgents.
+-->
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.anawolfdev.acompanante</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Library/Frameworks/Python.framework/Versions/3.14/bin/python3</string>
+        <string>-m</string>
+        <string>acompanante</string>
+        <string>vigilar</string>
+    </array>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/anaamarovazquez/proyectos/acompanante-salud</string>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>KeepAlive</key>
+    <true/>
+
+    <key>EnvironmentVariables</key>
+    <dict>
+        <!-- Para que los mensajes salgan en el log al momento. -->
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
+    </dict>
+
+    <key>StandardOutPath</key>
+    <string>/Users/anaamarovazquez/Library/Logs/acompanante.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/anaamarovazquez/Library/Logs/acompanante-error.log</string>
+</dict>
+</plist>
