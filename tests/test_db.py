@@ -151,6 +151,62 @@ def test_tension_sin_pulso_ni_nota(cfg):
     assert leida.nota == ""
 
 
+def test_actualizar_tension_cambia_los_datos(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    tension_id = db.guardar_tension(
+        con,
+        Tension(
+            fecha_hora=datetime(2026, 11, 9, 9, 5),
+            alta=130,
+            baja=85,
+            pulso=72,
+            nota="después de cenar",
+        ),
+    )
+    tension = db.listar_tensiones(con)[0]
+    tension.fecha_hora = datetime(2026, 11, 15, 10, 30)
+    tension.alta = 140
+    tension.baja = 90
+    tension.pulso = None
+
+    db.actualizar_tension(con, tension)
+
+    leida = db.listar_tensiones(con)[0]
+    assert leida.id == tension_id
+    assert leida.fecha_hora == datetime(2026, 11, 15, 10, 30)
+    assert (leida.alta, leida.baja, leida.pulso) == (140, 90, None)
+    assert leida.nota == "después de cenar"
+
+
+def test_obtener_tension_devuelve_la_toma_aunque_sea_antigua(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    primera = db.guardar_tension(
+        con, Tension(fecha_hora=datetime(2026, 11, 1, 9, 0), alta=120, baja=80)
+    )
+    for dia in range(2, 13):
+        db.guardar_tension(
+            con, Tension(fecha_hora=datetime(2026, 11, dia, 9, 0), alta=130, baja=85)
+        )
+
+    leida = db.obtener_tension(con, primera)
+
+    assert leida.id == primera
+    assert (leida.alta, leida.baja) == (120, 80)
+    assert leida.fecha_hora == datetime(2026, 11, 1, 9, 0)
+
+
+def test_obtener_tension_que_no_existe_falla(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    try:
+        db.obtener_tension(con, 99)
+    except ValueError as error:
+        assert "99" in str(error)
+    else:
+        raise AssertionError("Tenía que fallar con una toma que no existe")
+    finally:
+        con.close()
+
+
 def test_listar_tensiones_devuelve_las_10_mas_recientes(cfg):
     con = db.conectar(cfg.ruta_bd)
     for dia in range(1, 13):
@@ -163,3 +219,19 @@ def test_listar_tensiones_devuelve_las_10_mas_recientes(cfg):
     assert [toma.fecha_hora.day for toma in leidas] == [
         12, 11, 10, 9, 8, 7, 6, 5, 4, 3
     ]
+
+
+def test_borrar_tension_la_quita_de_la_lista(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    primera = db.guardar_tension(
+        con, Tension(fecha_hora=datetime(2026, 11, 9, 9, 0), alta=120, baja=80)
+    )
+    db.guardar_tension(
+        con, Tension(fecha_hora=datetime(2026, 11, 10, 9, 0), alta=130, baja=85)
+    )
+
+    db.borrar_tension(con, primera)
+
+    leidas = db.listar_tensiones(con)
+    assert len(leidas) == 1
+    assert leidas[0].alta == 130

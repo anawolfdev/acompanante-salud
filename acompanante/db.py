@@ -258,6 +258,31 @@ def guardar_tension(con: sqlite3.Connection, tension: Tension) -> int:
     return tension.id
 
 
+def obtener_tension(con: sqlite3.Connection, tension_id: int) -> Tension:
+    fila = con.execute(
+        "SELECT * FROM tensiones WHERE id = ?", (tension_id,)
+    ).fetchone()
+    if fila is None:
+        raise ValueError(f"No hay ninguna toma de tensión con el número {tension_id}")
+    return _fila_a_tension(fila)
+
+
+def actualizar_tension(con: sqlite3.Connection, tension: Tension) -> None:
+    con.execute(
+        "UPDATE tensiones SET fecha_hora = ?, alta = ?, baja = ?, pulso = ?, nota = ?"
+        " WHERE id = ?",
+        (
+            tension.fecha_hora.strftime(FORMATO),
+            tension.alta,
+            tension.baja,
+            tension.pulso,
+            tension.nota,
+            tension.id,
+        ),
+    )
+    con.commit()
+
+
 def listar_tensiones(con: sqlite3.Connection, limite: int = 10) -> list[Tension]:
     """Las últimas tomas, de la más reciente a la más antigua."""
     filas = con.execute(
@@ -265,3 +290,8 @@ def listar_tensiones(con: sqlite3.Connection, limite: int = 10) -> list[Tension]
         (limite,),
     ).fetchall()
     return [_fila_a_tension(fila) for fila in filas]
+
+
+def borrar_tension(con: sqlite3.Connection, tension_id: int) -> None:
+    con.execute("DELETE FROM tensiones WHERE id = ?", (tension_id,))
+    con.commit()

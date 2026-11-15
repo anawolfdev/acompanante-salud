@@ -10,9 +10,11 @@ from acompanante.notificador import (
     NotificadorConsola,
     NotificadorTelegram,
     consultar_chats,
+    contestar_callback,
     crear_notificador,
     descargar_foto,
     leer_mensajes,
+    registrar_comandos_telegram,
 )
 
 
@@ -39,6 +41,44 @@ def test_telegram_manda_el_texto():
     assert p.full_url == "https://api.telegram.org/bot123:ABC/sendMessage"
     datos = urllib.parse.parse_qs(p.data.decode())
     assert datos == {"chat_id": ["999"], "text": ["Recordatorio de salud."]}
+
+
+def test_telegram_manda_los_botones_inline():
+    peticiones = []
+    botones = [
+        [
+            {"text": "Cambiar", "callback_data": "cambiar:3"},
+            {"text": "Borrar", "callback_data": "borrar_cita:3"},
+        ]
+    ]
+    n = NotificadorTelegram("123:ABC", "999", abrir=abridor({"ok": True}, peticiones))
+    n.enviar("Estas son tus citas.", botones=botones)
+
+    datos = urllib.parse.parse_qs(peticiones[0].data.decode())
+    assert datos["chat_id"] == ["999"]
+    assert datos["text"] == ["Estas son tus citas."]
+    assert json.loads(datos["reply_markup"][0]) == {"inline_keyboard": botones}
+
+
+def test_contestar_callback_avisa_a_telegram():
+    peticiones = []
+    contestar_callback("123:ABC", "cb-1", abrir=abridor({"ok": True}, peticiones))
+
+    p = peticiones[0]
+    assert p.full_url == "https://api.telegram.org/bot123:ABC/answerCallbackQuery"
+    assert p.get_method() == "POST"
+    assert urllib.parse.parse_qs(p.data.decode()) == {
+        "callback_query_id": ["cb-1"]
+    }
+
+
+def test_contestar_callback_si_telegram_falla_avisa():
+    with pytest.raises(ErrorDeEnvio, match="botón"):
+        contestar_callback(
+            "123:ABC",
+            "cb-1",
+            abrir=abridor({"ok": False, "description": "bad request"}, []),
+        )
 
 
 def test_telegram_error_se_explica():
@@ -102,6 +142,34 @@ def test_leer_mensajes_devuelve_el_texto_y_el_chat():
     assert "offset=10" in peticiones[0].full_url
     assert "timeout=30" in peticiones[0].full_url
     assert peticiones[0].get_method() == "GET"
+
+
+def test_leer_mensajes_devuelve_los_botones_pulsados():
+    respuesta = {
+        "ok": True,
+        "result": [
+            {
+                "update_id": 30,
+                "callback_query": {
+                    "id": "cb-1",
+                    "data": "borrar_cita:2",
+                    "message": {"chat": {"id": 999}},
+                },
+            },
+        ],
+    }
+    mensajes = leer_mensajes("123:ABC", abrir=abridor(respuesta, []))
+
+    assert mensajes == [
+        {
+            "update_id": 30,
+            "chat_id": "999",
+            "texto": "",
+            "foto": "",
+            "callback_id": "cb-1",
+            "callback_data": "borrar_cita:2",
+        }
+    ]
 
 
 def test_leer_mensajes_sin_texto_no_rompe():
@@ -204,3 +272,37 @@ def test_descargar_foto_si_telegram_falla_avisa():
 
 def test_crear_notificador_por_defecto_es_consola():
     assert isinstance(crear_notificador(Config()), NotificadorConsola)
+
+
+def test_registrar_comandos_telegram_exito():
+    peticiones = []
+    respuesta = {"ok": True}
+    ok = registrar_comandos_telegram("123:ABC", abrir=abridor(respuesta, peticiones))
+    assert ok is True
+    p = peticiones[0]
+    assert p.full_url == "https://api.telegram.org/bot123:ABC/setMyCommands"
+    assert p.get_method() == "POST"
+    datos = json.loads(p.data.decode())
+    assert "commands" in datos
+    assert len(datos["commands"]) == 5
+    nombres = [c["command"] for c in datos["commands"]]
+    assert nombres == ["ayuda", "anadir", "citas", "tension", "historial"]
+    assert "añadir" not in nombres
+
+
+def test_registrar_comandos_telegram_fallo_silencioso():
+    # Telegram devuelve error
+    ok = registrar_comandos_telegram("123:ABC", abrir=abridor({"ok": False, "description": "bad request"}, []))
+    assert ok is False
+
+    # Excepción de red
+    def abrir_falla(peticion, timeout=None):
+        raise ConnectionError("sin red")
+
+    ok = registrar_comandos_telegram("123:ABC", abrir=abrir_falla)
+    assert ok is False
+
+
+def test_registrar_comandos_telegram_sin_token():
+    ok = registrar_comandos_telegram("")
+    assert ok is False
