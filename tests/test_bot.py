@@ -1,6 +1,6 @@
 from acompanante import db
 from acompanante.bot import atender_mensajes
-from acompanante.conversacion import AYUDA, NO_LEIDO_PAPEL
+from acompanante.conversacion import AYUDA, NO_LEIDO_PAPEL, Respuesta
 from acompanante.notificador import ErrorDeEnvio
 
 
@@ -136,3 +136,142 @@ def test_atender_si_no_puede_descargar_la_foto_avisa(cfg, monkeypatch):
 
     assert enviados == [("999", NO_LEIDO_PAPEL)]
     assert siguiente == 22
+
+
+def test_atender_atiende_los_botones_pulsados(cfg, monkeypatch):
+    cfg.telegram_token = "123:ABC"
+    cfg.telegram_chat_id = "999"
+    enviados = []
+    contestados = []
+    recibidos = []
+    botones = [[{"text": "Sí", "callback_data": "confirmar_borrar_citas"}]]
+
+    class TelegramFalso:
+        def __init__(self, token, chat_id):
+            self.chat_id = chat_id
+
+        def enviar(self, texto, botones=None):
+            enviados.append((self.chat_id, texto, botones))
+
+    def contestar_falso(token, callback_id, abrir=None):
+        contestados.append((token, callback_id))
+
+    def responder_falso(con, cfg, datos, chat_id=None):
+        recibidos.append((datos, chat_id))
+        return Respuesta("¿La borro? Responde sí o no.", botones=botones)
+
+    monkeypatch.setattr("acompanante.bot.NotificadorTelegram", TelegramFalso)
+    monkeypatch.setattr("acompanante.bot.contestar_callback", contestar_falso)
+    monkeypatch.setattr("acompanante.bot.responder_callback", responder_falso)
+    monkeypatch.setattr(
+        "acompanante.bot.leer_mensajes",
+        lambda token, offset=None, abrir=None: [
+            {
+                "update_id": 40,
+                "chat_id": "999",
+                "texto": "",
+                "foto": "",
+                "callback_id": "cb-1",
+                "callback_data": "borrar_cita:1",
+            },
+        ],
+    )
+
+    con = db.conectar(cfg.ruta_bd)
+    siguiente = atender_mensajes(con, cfg)
+    con.close()
+
+    assert contestados == [("123:ABC", "cb-1")]
+    assert recibidos == [("borrar_cita:1", "999")]
+    assert enviados == [
+        ("999", "¿La borro? Responde sí o no.", botones)
+    ]
+    assert siguiente == 41
+
+
+def test_atender_si_falla_contestar_el_boton_sigue_respondiendo(cfg, monkeypatch):
+    cfg.telegram_token = "123:ABC"
+    cfg.telegram_chat_id = "999"
+    enviados = []
+
+    class TelegramFalso:
+        def __init__(self, token, chat_id):
+            self.chat_id = chat_id
+
+        def enviar(self, texto, botones=None):
+            enviados.append((self.chat_id, texto))
+
+    def contestar_falla(token, callback_id, abrir=None):
+        raise ErrorDeEnvio("sin red")
+
+    monkeypatch.setattr("acompanante.bot.NotificadorTelegram", TelegramFalso)
+    monkeypatch.setattr("acompanante.bot.contestar_callback", contestar_falla)
+    monkeypatch.setattr(
+        "acompanante.bot.responder_callback",
+        lambda con, cfg, datos, chat_id=None: Respuesta("Cita borrada."),
+    )
+    monkeypatch.setattr(
+        "acompanante.bot.leer_mensajes",
+        lambda token, offset=None, abrir=None: [
+            {
+                "update_id": 50,
+                "chat_id": "999",
+                "texto": "",
+                "foto": "",
+                "callback_id": "cb-2",
+                "callback_data": "confirmar_borrar_citas",
+            },
+        ],
+    )
+
+    con = db.conectar(cfg.ruta_bd)
+    siguiente = atender_mensajes(con, cfg)
+    con.close()
+
+    assert enviados == [("999", "Cita borrada.")]
+    assert siguiente == 51
+
+
+def test_atender_manda_cada_cita_en_su_propio_mensaje(cfg, monkeypatch):
+    cfg.telegram_token = "123:ABC"
+    cfg.telegram_chat_id = "999"
+    enviados = []
+
+    class TelegramFalso:
+        def __init__(self, token, chat_id):
+            self.chat_id = chat_id
+
+        def enviar(self, texto, botones=None):
+            enviados.append((texto, botones))
+
+    botones_1 = [[{"text": "Cambiar", "callback_data": "cambiar:1"}]]
+    botones_2 = [[{"text": "Cambiar", "callback_data": "cambiar:2"}]]
+    partes = [
+        Respuesta("Estas son todas tus citas futuras:"),
+        Respuesta("[1] Cita uno", botones=botones_1),
+        Respuesta("[2] Cita dos", botones=botones_2),
+    ]
+    respuesta = Respuesta("\n".join(partes), mensajes=partes)
+
+    monkeypatch.setattr("acompanante.bot.NotificadorTelegram", TelegramFalso)
+    monkeypatch.setattr(
+        "acompanante.bot.leer_mensajes",
+        lambda token, offset=None, abrir=None: [
+            {"update_id": 60, "chat_id": "999", "texto": "/citas", "foto": ""},
+        ],
+    )
+    monkeypatch.setattr(
+        "acompanante.bot.responder",
+        lambda con, cfg, texto, chat_id=None, imagen=None: respuesta,
+    )
+
+    con = db.conectar(cfg.ruta_bd)
+    siguiente = atender_mensajes(con, cfg)
+    con.close()
+
+    assert enviados == [
+        ("Estas son todas tus citas futuras:", None),
+        ("[1] Cita uno", botones_1),
+        ("[2] Cita dos", botones_2),
+    ]
+    assert siguiente == 61

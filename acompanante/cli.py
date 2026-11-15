@@ -17,6 +17,7 @@ from acompanante.notificador import (
     NotificadorTelegram,
     consultar_chats,
     crear_notificador,
+    registrar_comandos_telegram,
 )
 from acompanante.recordatorios import enviar_avisos, momentos_de_aviso, texto_aviso
 from acompanante.textos import (
@@ -262,6 +263,8 @@ def orden_vigilar(args, cfg: Config) -> int:
     print("Vigilando tus citas. Para parar, pulsa Control + C")
     offset = None
     bot_activo = bool(cfg.telegram_token and cfg.telegram_chat_id)
+    if bot_activo:
+        registrar_comandos_telegram(cfg.telegram_token)
     ultima_revision = None
     try:
         while True:
