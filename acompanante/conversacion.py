@@ -6,14 +6,14 @@ contestar. Así se puede probar sin Internet.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from zoneinfo import ZoneInfo
 
 from acompanante import acciones, db
 from acompanante.config import Config
 from acompanante.extraer import ErrorExtraccion, extraer_cita
 from acompanante.ia import IANoDisponible
-from acompanante.modelos import Cita, Tension
+from acompanante.modelos import Cita, EntradaHistorial, Medicacion, Tension
 from acompanante.textos import (
     fecha_larga,
     hora_texto,
@@ -42,8 +42,12 @@ AYUDA = (
     "1. añadir: apuntar una cita nueva.\n"
     "2. citas: ver tus citas y sus botones.\n"
     "3. tension 130 85 72: apuntar una toma de tensión. Puedes añadir la fecha y la hora al final.\n"
-    "4. historial: ver tus tomas de tensión y sus botones.\n"
-    "5. ayuda: volver a ver esta ayuda."
+    "4. tensiones: ver tus tomas de tensión y sus botones.\n"
+    "5. medicacion: ver tus medicamentos y sus botones.\n"
+    "6. medicacion añadir: apuntar un medicamento.\n"
+    "7. historial: ver tu historial de salud y sus botones.\n"
+    "8. historial añadir: apuntar algo en tu historial de salud.\n"
+    "9. ayuda: volver a ver esta ayuda."
 )
 
 PROXIMAS_AHORA_CITAS = "Ahora se llama citas"
@@ -83,10 +87,68 @@ TENSION_VALORES_MAL = (
     "Escribe la alta, la baja y, si quieres, el pulso con números.\n"
     "Por ejemplo: 130 85 72."
 )
+
+SIN_MEDICACION = (
+    "No tienes ningún medicamento apuntado.\n"
+    "Para apuntar uno, escribe medicacion añadir."
+)
+MEDICACION_CABECERA = "Estos son tus medicamentos activos:"
+MEDICACION_PIDE_NOMBRE = (
+    "¿Cómo se llama el medicamento?\n"
+    "Por ejemplo: Paracetamol."
+)
+MEDICACION_PIDE_DOSIS = "¿Qué dosis?\nPor ejemplo: 1 comprimido."
+MEDICACION_PIDE_PAUTA = "¿Cada cuánto lo tomas?\nPor ejemplo: cada 8 horas."
+MEDICACION_BORRADA = "Medicamento borrado."
+MEDICACION_NO_BORRADA = "No lo he borrado. No se ha borrado nada."
+MEDICACION_PREGUNTA_BORRAR = "¿Lo borro? Responde sí o no."
+MEDICACION_MODIFICADA = "Medicamento modificado:"
+MEDICACION_CAMBIA_NOMBRE = (
+    "Nombre actual: {actual}.\n"
+    "Escribe el nombre nuevo, o no para dejarlo igual."
+)
+MEDICACION_CAMBIA_DOSIS = (
+    "Dosis actual: {actual}.\n"
+    "Escribe la dosis nueva, o no para dejarla igual."
+)
+MEDICACION_CAMBIA_PAUTA = (
+    "Pauta actual: {actual}.\n"
+    "Escribe la pauta nueva, o no para dejarla igual."
+)
+
+SIN_HISTORIAL = (
+    "No tienes ninguna entrada en tu historial de salud.\n"
+    "Para apuntar una, escribe historial añadir."
+)
+HISTORIAL_SALUD_CABECERA = "Estas son las entradas de tu historial de salud:"
+HISTORIAL_PIDE_DESCRIPCION = (
+    "¿Qué quieres apuntar?\n"
+    "Por ejemplo: Analítica de sangre. Todo salió bien."
+)
+HISTORIAL_PIDE_FECHA = (
+    "¿De qué día es?\n"
+    "Por ejemplo: 12/11/2026.\n"
+    "Si es de hoy, escribe hoy o no."
+)
+HISTORIAL_FECHA_MAL = (
+    "No he entendido la fecha.\n"
+    "Escríbela así: 12/11/2026."
+)
+HISTORIAL_BORRADA = "Entrada del historial borrada."
+HISTORIAL_MODIFICADA = "Entrada del historial modificada:"
+HISTORIAL_CAMBIA_DESCRIPCION = (
+    "Descripción actual:\n"
+    "{actual}\n"
+    "Escribe la descripción nueva, o no para dejarla igual."
+)
+HISTORIAL_CAMBIA_FECHA = (
+    "Fecha actual: {actual}.\n"
+    "Escribe la fecha nueva, o no para dejarla igual."
+)
 BORRAR_TENSION_SIN_NUMERO = (
     "No sé qué toma de tensión quieres borrar.\n"
     "Escribe el número después de /borrar-tension. Por ejemplo: /borrar-tension 1\n"
-    "El número 1 es la toma más reciente. Para verlas, escribe /historial."
+    "El número 1 es la toma más reciente. Para verlas, escribe /tensiones."
 )
 PREGUNTA_GUARDAR_VARIAS = "¿Las guardo? Responde sí o no."
 PREGUNTA_BORRAR_VARIAS = "¿Las borro? Responde sí o no."
@@ -187,6 +249,18 @@ _modificaciones_tension: dict[str, dict] = {}
 
 # Paso a paso de "añadir" cuando no se escribe la cita entera.
 _pasos_anadir: dict[str, dict] = {}
+
+# Paso a paso para apuntar un medicamento o una entrada del historial.
+_pasos_medicacion: dict[str, dict] = {}
+_pasos_historial: dict[str, dict] = {}
+
+# Medicamentos y entradas del historial que esperan un "sí" o un "no" para borrarse.
+_medicaciones_pendientes: dict[str, Medicacion] = {}
+_historial_pendientes: dict[str, EntradaHistorial] = {}
+
+# Medicamento o entrada del historial que se está modificando con sus pasos.
+_modificaciones_medicacion: dict[str, dict] = {}
+_modificaciones_historial: dict[str, dict] = {}
 
 
 def ahora_local(cfg: Config) -> datetime:
@@ -347,7 +421,7 @@ def _respuesta_confirmar_borrado_tension(toma: Tension) -> Respuesta:
 def _texto_no_existe_tension(numero: int) -> str:
     return (
         f"No hay ninguna toma de tensión con el número {numero}.\n"
-        "Escribe /historial para ver tus últimas tomas."
+        "Escribe /tensiones para ver tus últimas tomas."
     )
 
 
@@ -476,6 +550,256 @@ def _respuesta_historial_tension(tomas: list) -> Respuesta:
     return Respuesta("\n".join(partes), mensajes=partes)
 
 
+def _linea_medicacion(medicacion: Medicacion) -> str:
+    return f"{medicacion.nombre}: {medicacion.dosis}, {medicacion.pauta}"
+
+
+def _respuesta_medicaciones(medicaciones: list[Medicacion]) -> Respuesta:
+    """Muestra cada medicamento en su mensaje, con sus botones."""
+    if not medicaciones:
+        return Respuesta(SIN_MEDICACION)
+    partes = [Respuesta(MEDICACION_CABECERA)]
+    for posicion, medicacion in enumerate(medicaciones, start=1):
+        partes.append(
+            Respuesta(
+                f"{posicion}. {_linea_medicacion(medicacion)}",
+                botones=[
+                    [
+                        _boton(
+                            "Modificar",
+                            f"modificar_medicacion:{medicacion.id}",
+                        ),
+                        _boton("Borrar", f"borrar_medicacion:{medicacion.id}"),
+                    ]
+                ],
+            )
+        )
+    return Respuesta("\n".join(partes), mensajes=partes)
+
+
+def _texto_borrado_medicacion(medicacion: Medicacion) -> str:
+    return "\n".join(
+        [
+            "Vas a borrar este medicamento:",
+            _linea_medicacion(medicacion),
+            MEDICACION_PREGUNTA_BORRAR,
+        ]
+    )
+
+
+def _respuesta_confirmar_borrado_medicacion(medicacion: Medicacion) -> Respuesta:
+    botones = [
+        [
+            _boton("Sí", "confirmar_borrar_medicacion"),
+            _boton("No", "cancelar_borrar_medicacion"),
+        ]
+    ]
+    return Respuesta(_texto_borrado_medicacion(medicacion), botones=botones)
+
+
+def _linea_historial(entrada: EntradaHistorial) -> str:
+    return f"{fecha_larga(entrada.fecha)}: {entrada.descripcion}"
+
+
+def _respuesta_historial(entradas: list[EntradaHistorial]) -> Respuesta:
+    """Muestra cada entrada en su mensaje, con sus botones."""
+    if not entradas:
+        return Respuesta(SIN_HISTORIAL)
+    partes = [Respuesta(HISTORIAL_SALUD_CABECERA)]
+    for posicion, entrada in enumerate(entradas, start=1):
+        partes.append(
+            Respuesta(
+                f"{posicion}. {_linea_historial(entrada)}",
+                botones=[
+                    [
+                        _boton("Modificar", f"modificar_historial:{entrada.id}"),
+                        _boton("Borrar", f"borrar_historial:{entrada.id}"),
+                    ]
+                ],
+            )
+        )
+    return Respuesta("\n".join(partes), mensajes=partes)
+
+
+def _texto_borrado_historial(entrada: EntradaHistorial) -> str:
+    return "\n".join(
+        [
+            "Vas a borrar esta entrada del historial:",
+            _linea_historial(entrada),
+            PREGUNTA_BORRAR,
+        ]
+    )
+
+
+def _respuesta_confirmar_borrado_historial(entrada: EntradaHistorial) -> Respuesta:
+    botones = [
+        [
+            _boton("Sí", "confirmar_borrar_historial"),
+            _boton("No", "cancelar_borrar_historial"),
+        ]
+    ]
+    return Respuesta(_texto_borrado_historial(entrada), botones=botones)
+
+
+def _fecha_de_hoy(texto: str, ahora: datetime) -> date:
+    """Para el historial: 'hoy', 'no' o nada significa el día de hoy."""
+    limpio = texto.strip().lower()
+    if limpio in ("hoy", "no", "n", ""):
+        return ahora.date()
+    return parsear_fecha(texto.strip())
+
+
+def _avanzar_paso_medicacion(con, texto: str, clave: str) -> Respuesta:
+    """Sigue el paso a paso para apuntar un medicamento."""
+    estado = _pasos_medicacion[clave]
+    limpio = texto.strip()
+
+    if estado["paso"] == "nombre":
+        if not limpio:
+            return Respuesta(MEDICACION_PIDE_NOMBRE)
+        estado["nombre"] = limpio
+        estado["paso"] = "dosis"
+        return Respuesta(MEDICACION_PIDE_DOSIS)
+
+    if estado["paso"] == "dosis":
+        if not limpio:
+            return Respuesta(MEDICACION_PIDE_DOSIS)
+        estado["dosis"] = limpio
+        estado["paso"] = "pauta"
+        return Respuesta(MEDICACION_PIDE_PAUTA)
+
+    if estado["paso"] == "pauta":
+        if not limpio:
+            return Respuesta(MEDICACION_PIDE_PAUTA)
+        try:
+            medicacion = Medicacion(
+                nombre=estado["nombre"],
+                dosis=estado["dosis"],
+                pauta=limpio,
+            )
+        except ValueError as error:
+            return Respuesta(str(error))
+        db.guardar_medicacion(con, medicacion)
+        _pasos_medicacion.pop(clave, None)
+        return Respuesta(f"Medicamento guardado:\n{_linea_medicacion(medicacion)}")
+
+    _pasos_medicacion.pop(clave, None)
+    return Respuesta(NO_ENTENDIDO)
+
+
+def _avanzar_modificacion_medicacion(con, texto: str, clave: str) -> Respuesta:
+    """Sigue el paso a paso para cambiar un medicamento."""
+    estado = _modificaciones_medicacion[clave]
+    medicacion = estado["medicacion"]
+    limpio = texto.strip()
+
+    if estado["paso"] == "nombre":
+        if limpio and limpio.lower() not in ("no", "n"):
+            estado["nombre"] = limpio
+        estado["paso"] = "dosis"
+        return Respuesta(MEDICACION_CAMBIA_DOSIS.format(actual=estado["dosis"]))
+
+    if estado["paso"] == "dosis":
+        if limpio and limpio.lower() not in ("no", "n"):
+            estado["dosis"] = limpio
+        estado["paso"] = "pauta"
+        return Respuesta(MEDICACION_CAMBIA_PAUTA.format(actual=estado["pauta"]))
+
+    if estado["paso"] == "pauta":
+        if limpio and limpio.lower() not in ("no", "n"):
+            estado["pauta"] = limpio
+        try:
+            nueva = Medicacion(
+                nombre=estado["nombre"],
+                dosis=estado["dosis"],
+                pauta=estado["pauta"],
+                activa=medicacion.activa,
+                id=medicacion.id,
+            )
+        except ValueError as error:
+            return Respuesta(str(error))
+        db.actualizar_medicacion(con, nueva)
+        _modificaciones_medicacion.pop(clave, None)
+        return Respuesta(f"{MEDICACION_MODIFICADA}\n{_linea_medicacion(nueva)}")
+
+    _modificaciones_medicacion.pop(clave, None)
+    return Respuesta(NO_ENTENDIDO)
+
+
+def _avanzar_paso_historial(con, texto: str, clave: str, ahora: datetime) -> Respuesta:
+    """Sigue el paso a paso para apuntar una entrada del historial."""
+    estado = _pasos_historial[clave]
+    limpio = texto.strip()
+
+    if estado["paso"] == "descripcion":
+        if not limpio:
+            return Respuesta(HISTORIAL_PIDE_DESCRIPCION)
+        estado["descripcion"] = limpio
+        estado["paso"] = "fecha"
+        return Respuesta(HISTORIAL_PIDE_FECHA)
+
+    if estado["paso"] == "fecha":
+        try:
+            fecha = _fecha_de_hoy(limpio, ahora)
+        except ValueError:
+            return Respuesta(HISTORIAL_FECHA_MAL)
+        try:
+            entrada = EntradaHistorial(
+                descripcion=estado["descripcion"], fecha=fecha
+            )
+        except ValueError as error:
+            return Respuesta(str(error))
+        db.guardar_entrada_historial(con, entrada)
+        _pasos_historial.pop(clave, None)
+        return Respuesta(f"Entrada guardada:\n{_linea_historial(entrada)}")
+
+    _pasos_historial.pop(clave, None)
+    return Respuesta(NO_ENTENDIDO)
+
+
+def _avanzar_modificacion_historial(
+    con, texto: str, clave: str, ahora: datetime
+) -> Respuesta:
+    """Sigue el paso a paso para cambiar una entrada del historial."""
+    estado = _modificaciones_historial[clave]
+    entrada = estado["entrada"]
+    limpio = texto.strip()
+
+    if estado["paso"] == "descripcion":
+        if limpio and limpio.lower() not in ("no", "n"):
+            estado["descripcion"] = limpio
+        estado["paso"] = "fecha"
+        return Respuesta(
+            HISTORIAL_CAMBIA_FECHA.format(actual=fecha_larga(estado["fecha"]))
+        )
+
+    if estado["paso"] == "fecha":
+        limpio_minusculas = limpio.lower()
+        if limpio_minusculas in ("no", "n", ""):
+            fecha = estado["fecha"]
+        elif limpio_minusculas == "hoy":
+            fecha = ahora.date()
+        else:
+            try:
+                fecha = parsear_fecha(limpio)
+            except ValueError:
+                return Respuesta(HISTORIAL_FECHA_MAL)
+        try:
+            nueva = EntradaHistorial(
+                descripcion=estado["descripcion"],
+                fecha=fecha,
+                id=entrada.id,
+            )
+        except ValueError as error:
+            return Respuesta(str(error))
+        db.actualizar_entrada_historial(con, nueva)
+        _modificaciones_historial.pop(clave, None)
+        return Respuesta(f"{HISTORIAL_MODIFICADA}\n{_linea_historial(nueva)}")
+
+    _modificaciones_historial.pop(clave, None)
+    return Respuesta(NO_ENTENDIDO)
+
+
 def _texto_propuesta(cita: Cita) -> str:
     lineas = [
         "He entendido esta cita:",
@@ -534,6 +858,8 @@ _ORDENES_CONOCIDAS: dict[str, bool] = {
     "borrar": True,
     "borrar-tension": True,
     "tension": True,
+    "tensiones": False,
+    "medicacion": False,
     "historial": False,
 }
 
@@ -571,6 +897,10 @@ def _parsear_orden(texto: str) -> tuple[str, str]:
     return primera, resto
 
 
+def _es_anadir(resto: str) -> bool:
+    return resto.strip().lower() in ("anadir", "añadir", "nuevo", "nueva")
+
+
 def _es_orden_valida(orden: str, resto: str, texto_original: str) -> bool:
     """Comprueba si el mensaje parece una invocación de orden válida.
 
@@ -583,6 +913,10 @@ def _es_orden_valida(orden: str, resto: str, texto_original: str) -> bool:
 
     # "añadir" es válido con o sin datos: sin datos empieza el paso a paso.
     if orden == "añadir":
+        return True
+
+    # "medicacion" e "historial" pueden llevar "anadir" para empezar el paso a paso.
+    if orden in ("medicacion", "historial") and _es_anadir(resto):
         return True
 
     # Si el original empieza por "/", es explícitamente una orden
@@ -818,6 +1152,18 @@ def _responder_frase(
     if clave in _pasos_anadir:
         return _avanzar_paso_anadir(con, texto, clave)
 
+    if clave in _pasos_medicacion:
+        return _avanzar_paso_medicacion(con, texto, clave)
+
+    if clave in _pasos_historial:
+        return _avanzar_paso_historial(con, texto, clave, ahora)
+
+    if clave in _modificaciones_medicacion:
+        return _avanzar_modificacion_medicacion(con, texto, clave)
+
+    if clave in _modificaciones_historial:
+        return _avanzar_modificacion_historial(con, texto, clave, ahora)
+
     if clave in _modificaciones_tension:
         return _avanzar_modificacion_tension(con, texto, clave)
 
@@ -839,6 +1185,24 @@ def _responder_frase(
         acciones.cambiar_cita(con, cita_a_cambiar, nueva)
         _cambios_por_boton.pop(clave, None)
         return Respuesta(_texto_cita_cambiada(nueva))
+
+    pendiente_medicacion = _medicaciones_pendientes.pop(clave, None)
+    if pendiente_medicacion is not None:
+        if imagen is None and _primera_palabra(texto) in ("sí", "si", "s"):
+            db.borrar_medicacion(con, pendiente_medicacion.id)
+            return MEDICACION_BORRADA
+        if imagen is None and _primera_palabra(texto) in ("no", "n"):
+            return MEDICACION_NO_BORRADA
+        # Si escribe otra cosa o manda una foto, se olvida el borrado.
+
+    pendiente_historial = _historial_pendientes.pop(clave, None)
+    if pendiente_historial is not None:
+        if imagen is None and _primera_palabra(texto) in ("sí", "si", "s"):
+            db.borrar_entrada_historial(con, pendiente_historial.id)
+            return HISTORIAL_BORRADA
+        if imagen is None and _primera_palabra(texto) in ("no", "n"):
+            return NO_BORRADA
+        # Si escribe otra cosa o manda una foto, se olvida el borrado.
 
     pendiente_tension = _tensiones_pendientes.pop(clave, None)
     if pendiente_tension is not None:
@@ -946,6 +1310,12 @@ def _responder(
         _pasos_anadir.pop(clave, None)
         _cambios_por_boton.pop(clave, None)
         _modificaciones_tension.pop(clave, None)
+        _pasos_medicacion.pop(clave, None)
+        _pasos_historial.pop(clave, None)
+        _medicaciones_pendientes.pop(clave, None)
+        _historial_pendientes.pop(clave, None)
+        _modificaciones_medicacion.pop(clave, None)
+        _modificaciones_historial.pop(clave, None)
 
     # Procesar órdenes conocidas
     if es_orden and orden == "proximas":
@@ -963,9 +1333,21 @@ def _responder(
         # Para tension, necesitamos las partes separadas como antes
         partes = texto.strip().split()
         return _apuntar_tension(con, cfg, partes, ahora)
-    if es_orden and orden == "historial":
+    if es_orden and orden == "tensiones":
         tomas = db.listar_tensiones(con)
         return _respuesta_historial_tension(tomas)
+    if es_orden and orden == "medicacion":
+        if _es_anadir(resto):
+            clave = _clave_chat(chat_id)
+            _pasos_medicacion[clave] = {"paso": "nombre"}
+            return Respuesta(MEDICACION_PIDE_NOMBRE)
+        return _respuesta_medicaciones(db.listar_medicaciones(con))
+    if es_orden and orden == "historial":
+        if _es_anadir(resto):
+            clave = _clave_chat(chat_id)
+            _pasos_historial[clave] = {"paso": "descripcion"}
+            return Respuesta(HISTORIAL_PIDE_DESCRIPCION)
+        return _respuesta_historial(db.listar_historial(con))
     if es_orden and orden == "ayuda":
         return AYUDA
 
@@ -1016,6 +1398,28 @@ def _tension_por_id(con, valor: str) -> Tension | None:
         return None
 
 
+def _medicacion_por_id(con, valor: str) -> Medicacion | None:
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return db.obtener_medicacion(con, numero)
+    except ValueError:
+        return None
+
+
+def _historial_por_id(con, valor: str) -> EntradaHistorial | None:
+    try:
+        numero = int(valor)
+    except (TypeError, ValueError):
+        return None
+    try:
+        return db.obtener_entrada_historial(con, numero)
+    except ValueError:
+        return None
+
+
 def _limpiar_pendientes(clave: str) -> None:
     _pendientes.pop(clave, None)
     _borrados_pendientes.pop(clave, None)
@@ -1024,6 +1428,12 @@ def _limpiar_pendientes(clave: str) -> None:
     _cambios_por_boton.pop(clave, None)
     _modificaciones_tension.pop(clave, None)
     _pasos_anadir.pop(clave, None)
+    _pasos_medicacion.pop(clave, None)
+    _pasos_historial.pop(clave, None)
+    _medicaciones_pendientes.pop(clave, None)
+    _historial_pendientes.pop(clave, None)
+    _modificaciones_medicacion.pop(clave, None)
+    _modificaciones_historial.pop(clave, None)
 
 
 def responder_callback(con, cfg: Config, datos: str, chat_id=None) -> Respuesta:
@@ -1063,6 +1473,53 @@ def responder_callback(con, cfg: Config, datos: str, chat_id=None) -> Respuesta:
         _modificaciones_tension[clave] = {"toma": toma, "paso": "valores"}
         return Respuesta(TENSION_PIDE_VALORES)
 
+    if prefijo == "borrar_medicacion":
+        medicacion = _medicacion_por_id(con, valor)
+        if medicacion is None:
+            return Respuesta(BOTON_CADUCADO)
+        _limpiar_pendientes(clave)
+        _medicaciones_pendientes[clave] = medicacion
+        return _respuesta_confirmar_borrado_medicacion(medicacion)
+
+    if prefijo == "modificar_medicacion":
+        medicacion = _medicacion_por_id(con, valor)
+        if medicacion is None:
+            return Respuesta(BOTON_CADUCADO)
+        _limpiar_pendientes(clave)
+        _modificaciones_medicacion[clave] = {
+            "medicacion": medicacion,
+            "paso": "nombre",
+            "nombre": medicacion.nombre,
+            "dosis": medicacion.dosis,
+            "pauta": medicacion.pauta,
+        }
+        return Respuesta(
+            MEDICACION_CAMBIA_NOMBRE.format(actual=medicacion.nombre)
+        )
+
+    if prefijo == "borrar_historial":
+        entrada = _historial_por_id(con, valor)
+        if entrada is None:
+            return Respuesta(BOTON_CADUCADO)
+        _limpiar_pendientes(clave)
+        _historial_pendientes[clave] = entrada
+        return _respuesta_confirmar_borrado_historial(entrada)
+
+    if prefijo == "modificar_historial":
+        entrada = _historial_por_id(con, valor)
+        if entrada is None:
+            return Respuesta(BOTON_CADUCADO)
+        _limpiar_pendientes(clave)
+        _modificaciones_historial[clave] = {
+            "entrada": entrada,
+            "paso": "descripcion",
+            "descripcion": entrada.descripcion,
+            "fecha": entrada.fecha,
+        }
+        return Respuesta(
+            HISTORIAL_CAMBIA_DESCRIPCION.format(actual=entrada.descripcion)
+        )
+
     if datos == "confirmar_borrar_citas":
         citas = _borrados_pendientes.pop(clave, [])
         if not citas:
@@ -1086,6 +1543,28 @@ def responder_callback(con, cfg: Config, datos: str, chat_id=None) -> Respuesta:
 
     if datos == "cancelar_borrar_tension":
         _tensiones_pendientes.pop(clave, None)
+        return Respuesta(NO_BORRADA)
+
+    if datos == "confirmar_borrar_medicacion":
+        medicacion = _medicaciones_pendientes.pop(clave, None)
+        if medicacion is None:
+            return Respuesta(BOTON_CADUCADO)
+        db.borrar_medicacion(con, medicacion.id)
+        return Respuesta(MEDICACION_BORRADA)
+
+    if datos == "cancelar_borrar_medicacion":
+        _medicaciones_pendientes.pop(clave, None)
+        return Respuesta(MEDICACION_NO_BORRADA)
+
+    if datos == "confirmar_borrar_historial":
+        entrada = _historial_pendientes.pop(clave, None)
+        if entrada is None:
+            return Respuesta(BOTON_CADUCADO)
+        db.borrar_entrada_historial(con, entrada.id)
+        return Respuesta(HISTORIAL_BORRADA)
+
+    if datos == "cancelar_borrar_historial":
+        _historial_pendientes.pop(clave, None)
         return Respuesta(NO_BORRADA)
 
     return Respuesta(BOTON_CADUCADO)

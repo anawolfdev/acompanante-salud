@@ -284,9 +284,17 @@ def test_registrar_comandos_telegram_exito():
     assert p.get_method() == "POST"
     datos = json.loads(p.data.decode())
     assert "commands" in datos
-    assert len(datos["commands"]) == 5
+    assert len(datos["commands"]) == 7
     nombres = [c["command"] for c in datos["commands"]]
-    assert nombres == ["ayuda", "anadir", "citas", "tension", "historial"]
+    assert nombres == [
+        "ayuda",
+        "anadir",
+        "citas",
+        "tension",
+        "tensiones",
+        "medicacion",
+        "historial",
+    ]
     assert "añadir" not in nombres
 
 

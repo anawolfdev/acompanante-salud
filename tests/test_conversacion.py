@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 import pytest
 
@@ -10,9 +10,17 @@ from acompanante.conversacion import (
     ANADIR_PIDE_TITULO,
     FALTAN_DATOS,
     HISTORIAL_CABECERA,
+    HISTORIAL_PIDE_DESCRIPCION,
+    HISTORIAL_PIDE_FECHA,
     IA_NO_ACTIVADA,
+    MEDICACION_CABECERA,
+    MEDICACION_PIDE_DOSIS,
+    MEDICACION_PIDE_NOMBRE,
+    MEDICACION_PIDE_PAUTA,
     NO_ENTENDIDO,
     NO_LEIDO_PAPEL,
+    SIN_HISTORIAL,
+    SIN_MEDICACION,
     SIN_TENSION,
     TENSION_PIDE_FECHA,
     TENSION_PIDE_VALORES,
@@ -22,7 +30,7 @@ from acompanante.conversacion import (
 )
 from acompanante.extraer import PropuestaCita
 from acompanante.ia import IANoDisponible
-from acompanante.modelos import Cita, Tension
+from acompanante.modelos import Cita, EntradaHistorial, Medicacion, Tension
 
 
 @pytest.fixture(autouse=True)
@@ -34,6 +42,12 @@ def limpiar_citas_pendientes():
     conversacion._cambios_por_boton.clear()
     conversacion._modificaciones_tension.clear()
     conversacion._pasos_anadir.clear()
+    conversacion._pasos_medicacion.clear()
+    conversacion._pasos_historial.clear()
+    conversacion._medicaciones_pendientes.clear()
+    conversacion._historial_pendientes.clear()
+    conversacion._modificaciones_medicacion.clear()
+    conversacion._modificaciones_historial.clear()
     yield
     conversacion._pendientes.clear()
     conversacion._borrados_pendientes.clear()
@@ -42,6 +56,12 @@ def limpiar_citas_pendientes():
     conversacion._cambios_por_boton.clear()
     conversacion._modificaciones_tension.clear()
     conversacion._pasos_anadir.clear()
+    conversacion._pasos_medicacion.clear()
+    conversacion._pasos_historial.clear()
+    conversacion._medicaciones_pendientes.clear()
+    conversacion._historial_pendientes.clear()
+    conversacion._modificaciones_medicacion.clear()
+    conversacion._modificaciones_historial.clear()
 
 
 def propuesta_de_ejemplo():
@@ -706,7 +726,7 @@ def test_borrar_tension_numero_que_no_existe_avisa(cfg):
 
     assert respuesta == (
         "No hay ninguna toma de tensión con el número 7.\n"
-        "Escribe /historial para ver tus últimas tomas."
+        "Escribe /tensiones para ver tus últimas tomas."
     )
 
 
@@ -911,9 +931,9 @@ def test_boton_de_una_cita_que_ya_no_existe_avisa(cfg):
     assert respuesta == "Ese botón ya no vale. Escribe /ayuda para ver lo que sé hacer."
 
 
-def test_historial_numera_las_tomas_y_muestra_nota_solo_si_la_tiene(cfg):
+def test_tensiones_numera_las_tomas_y_muestra_nota_solo_si_la_tiene(cfg):
     con = guardar_tensiones_de_ejemplo(cfg)
-    respuesta = responder(con, cfg, "historial")
+    respuesta = responder(con, cfg, "tensiones")
     con.close()
 
     lineas = respuesta.splitlines()
@@ -947,7 +967,7 @@ def test_ayuda_tiene_una_linea_por_comando(cfg):
 
     assert respuesta == AYUDA
     lineas = respuesta.splitlines()
-    assert len(lineas) == 6
+    assert len(lineas) == 10
     assert lineas[0] == "Puedo hacer estas cosas:"
     assert lineas[1] == "1. añadir: apuntar una cita nueva."
     assert lineas[2] == "2. citas: ver tus citas y sus botones."
@@ -955,8 +975,12 @@ def test_ayuda_tiene_una_linea_por_comando(cfg):
         "3. tension 130 85 72: apuntar una toma de tensión. "
         "Puedes añadir la fecha y la hora al final."
     )
-    assert lineas[4] == "4. historial: ver tus tomas de tensión y sus botones."
-    assert lineas[5] == "5. ayuda: volver a ver esta ayuda."
+    assert lineas[4] == "4. tensiones: ver tus tomas de tensión y sus botones."
+    assert lineas[5] == "5. medicacion: ver tus medicamentos y sus botones."
+    assert lineas[6] == "6. medicacion añadir: apuntar un medicamento."
+    assert lineas[7] == "7. historial: ver tu historial de salud y sus botones."
+    assert lineas[8] == "8. historial añadir: apuntar algo en tu historial de salud."
+    assert lineas[9] == "9. ayuda: volver a ver esta ayuda."
     assert "cambiar" not in respuesta
     assert "borrar" not in respuesta
 
@@ -995,23 +1019,23 @@ def test_ordenes_sin_barra_funcionan_igual(cfg):
     con.close()
 
 
-def test_historial_sin_barra_funciona_igual(cfg):
-    """La orden historial sin barra funciona igual que con barra."""
+def test_tensiones_sin_barra_funciona_igual(cfg):
+    """La orden tensiones sin barra funciona igual que con barra."""
     # BD limpia para este test
     con = db.conectar(cfg.ruta_bd)
 
-    # historial sin datos
-    r1 = responder(con, cfg, "historial")
-    r2 = responder(con, cfg, "/historial")
+    # tensiones sin datos
+    r1 = responder(con, cfg, "tensiones")
+    r2 = responder(con, cfg, "/tensiones")
     assert r1 == r2 == SIN_TENSION
 
     # añadir una tensión
     responder(con, cfg, "tension 130 85 72")
     responder(con, cfg, "tension 120 80")
 
-    # historial con datos
-    r1 = responder(con, cfg, "historial")
-    r2 = responder(con, cfg, "/historial")
+    # tensiones con datos
+    r1 = responder(con, cfg, "tensiones")
+    r2 = responder(con, cfg, "/tensiones")
     assert r1 == r2
     assert "130 de alta, 85 de baja, pulso 72" in r1
     assert "120 de alta, 80 de baja" in r1
@@ -1250,3 +1274,361 @@ def test_debe_responder_solo_al_chat_autorizado(cfg):
 
 def test_debe_responder_sin_chat_configurado(cfg):
     assert debe_responder("999", cfg) is False
+
+
+def guardar_medicamentos_de_ejemplo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_medicacion(
+        con,
+        Medicacion(
+            nombre="Paracetamol",
+            dosis="1 comprimido",
+            pauta="cada 8 horas",
+        ),
+    )
+    db.guardar_medicacion(
+        con,
+        Medicacion(
+            nombre="Ibuprofeno",
+            dosis="1 comprimido",
+            pauta="cada 12 horas",
+        ),
+    )
+    return con
+
+
+def test_medicacion_sin_medicamentos_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "medicacion")
+    con.close()
+
+    assert respuesta == SIN_MEDICACION
+
+
+def test_medicacion_manda_cada_medicamento_con_sus_botones(cfg):
+    con = guardar_medicamentos_de_ejemplo(cfg)
+    respuesta = responder(con, cfg, "medicacion")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert respuesta.mensajes[0] == MEDICACION_CABECERA
+    assert "1. Paracetamol: 1 comprimido, cada 8 horas" in respuesta.mensajes[1]
+    assert "2. Ibuprofeno: 1 comprimido, cada 12 horas" in respuesta.mensajes[2]
+    assert respuesta.mensajes[1].botones == [
+        [
+            {
+                "text": "Modificar",
+                "callback_data": f"modificar_medicacion:{medicaciones[0].id}",
+            },
+            {
+                "text": "Borrar",
+                "callback_data": f"borrar_medicacion:{medicaciones[0].id}",
+            },
+        ]
+    ]
+    assert len(respuesta.mensajes) == 3
+
+
+def test_medicacion_anadir_pide_nombre_dosis_y_pauta(cfg):
+    con = db.conectar(cfg.ruta_bd)
+
+    respuesta = responder(con, cfg, "medicacion anadir")
+    assert respuesta == MEDICACION_PIDE_NOMBRE
+
+    respuesta = responder(con, cfg, "Paracetamol")
+    assert respuesta == MEDICACION_PIDE_DOSIS
+
+    respuesta = responder(con, cfg, "1 comprimido")
+    assert respuesta == MEDICACION_PIDE_PAUTA
+
+    respuesta = responder(con, cfg, "cada 8 horas")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert "Medicamento guardado:" in respuesta
+    assert "Paracetamol: 1 comprimido, cada 8 horas" in respuesta
+    assert len(medicaciones) == 1
+    assert medicaciones[0].nombre == "Paracetamol"
+    assert medicaciones[0].dosis == "1 comprimido"
+    assert medicaciones[0].pauta == "cada 8 horas"
+
+
+def test_medicacion_anadir_con_barra_tambien_funciona(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "/medicacion anadir")
+    con.close()
+
+    assert respuesta == MEDICACION_PIDE_NOMBRE
+
+
+def test_boton_modificar_medicacion_permite_cambiar_cualquier_campo(cfg):
+    con = guardar_medicamentos_de_ejemplo(cfg)
+    medicacion = db.listar_medicaciones(con)[0]
+
+    respuesta = responder_callback(
+        con, cfg, f"modificar_medicacion:{medicacion.id}"
+    )
+    assert "Nombre actual: Paracetamol." in respuesta
+
+    respuesta = responder(con, cfg, "no")
+    assert "Dosis actual: 1 comprimido." in respuesta
+
+    respuesta = responder(con, cfg, "2 comprimidos")
+    assert "Pauta actual: cada 8 horas." in respuesta
+
+    respuesta = responder(con, cfg, "cada 12 horas")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert "Medicamento modificado:" in respuesta
+    assert medicaciones[0].nombre == "Paracetamol"
+    assert medicaciones[0].dosis == "2 comprimidos"
+    assert medicaciones[0].pauta == "cada 12 horas"
+
+
+def test_boton_borrar_medicacion_pide_confirmacion_y_borra(cfg):
+    con = guardar_medicamentos_de_ejemplo(cfg)
+    medicacion = db.listar_medicaciones(con)[0]
+
+    respuesta = responder_callback(con, cfg, f"borrar_medicacion:{medicacion.id}")
+    assert "Vas a borrar este medicamento:" in respuesta
+    assert "Paracetamol: 1 comprimido, cada 8 horas" in respuesta
+    assert "¿Lo borro? Responde sí o no." in respuesta
+    assert respuesta.botones == [
+        [
+            {"text": "Sí", "callback_data": "confirmar_borrar_medicacion"},
+            {"text": "No", "callback_data": "cancelar_borrar_medicacion"},
+        ]
+    ]
+
+    respuesta = responder_callback(con, cfg, "confirmar_borrar_medicacion")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert respuesta == "Medicamento borrado."
+    assert len(medicaciones) == 1
+    assert medicaciones[0].nombre == "Ibuprofeno"
+
+
+def test_boton_borrar_medicacion_cancelar_no_borra(cfg):
+    con = guardar_medicamentos_de_ejemplo(cfg)
+    medicacion = db.listar_medicaciones(con)[0]
+    responder_callback(con, cfg, f"borrar_medicacion:{medicacion.id}")
+
+    respuesta = responder_callback(con, cfg, "cancelar_borrar_medicacion")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert respuesta == "No lo he borrado. No se ha borrado nada."
+    assert len(medicaciones) == 2
+
+
+def test_boton_de_un_medicamento_que_ya_no_existe_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder_callback(con, cfg, "modificar_medicacion:99")
+    con.close()
+
+    assert respuesta == "Ese botón ya no vale. Escribe /ayuda para ver lo que sé hacer."
+
+
+def test_historial_sin_entradas_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder(con, cfg, "historial")
+    con.close()
+
+    assert respuesta == SIN_HISTORIAL
+
+
+def test_historial_manda_cada_entrada_de_mas_reciente_a_mas_antigua(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    db.guardar_entrada_historial(
+        con,
+        EntradaHistorial(descripcion="Nota del médico", fecha=date(2026, 11, 10)),
+    )
+    entradas = db.listar_historial(con)
+
+    respuesta = responder(con, cfg, "historial")
+    con.close()
+
+    assert respuesta.mensajes[0] == "Estas son las entradas de tu historial de salud:"
+    assert "1. martes 10 de noviembre: Nota del médico" in respuesta.mensajes[1]
+    assert "2. lunes 9 de noviembre: Analítica" in respuesta.mensajes[2]
+    assert respuesta.mensajes[1].botones == [
+        [
+            {
+                "text": "Modificar",
+                "callback_data": f"modificar_historial:{entradas[0].id}",
+            },
+            {
+                "text": "Borrar",
+                "callback_data": f"borrar_historial:{entradas[0].id}",
+            },
+        ]
+    ]
+    assert len(respuesta.mensajes) == 3
+
+
+def test_historial_anadir_guarda_la_fecha_de_hoy_si_se_dice_no(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    ahora = datetime(2026, 11, 16, 10, 0)
+
+    respuesta = responder(con, cfg, "historial anadir", ahora=ahora)
+    assert respuesta == HISTORIAL_PIDE_DESCRIPCION
+
+    respuesta = responder(con, cfg, "Analítica de sangre. Todo bien.", ahora=ahora)
+    assert respuesta == HISTORIAL_PIDE_FECHA
+
+    respuesta = responder(con, cfg, "no", ahora=ahora)
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert "Entrada guardada:" in respuesta
+    assert "lunes 16 de noviembre: Analítica de sangre. Todo bien." in respuesta
+    assert len(entradas) == 1
+    assert entradas[0].descripcion == "Analítica de sangre. Todo bien."
+    assert entradas[0].fecha == date(2026, 11, 16)
+
+
+def test_historial_anadir_acepta_una_fecha_escrita(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    ahora = datetime(2026, 11, 16, 10, 0)
+    responder(con, cfg, "historial anadir", ahora=ahora)
+    responder(con, cfg, "Nota del médico", ahora=ahora)
+
+    respuesta = responder(con, cfg, "12/11/2026", ahora=ahora)
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert "Entrada guardada:" in respuesta
+    assert entradas[0].fecha == date(2026, 11, 12)
+
+
+def test_historial_anadir_con_fecha_mal_la_vuelve_a_pedir(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    ahora = datetime(2026, 11, 16, 10, 0)
+    responder(con, cfg, "historial anadir", ahora=ahora)
+    responder(con, cfg, "Nota del médico", ahora=ahora)
+
+    respuesta = responder(con, cfg, "mañana", ahora=ahora)
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert "No he entendido la fecha." in respuesta
+    assert "12/11/2026" in respuesta
+    assert entradas == []
+
+
+def test_boton_modificar_historial_cambia_la_descripcion_y_deja_la_fecha(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    ahora = datetime(2026, 11, 16, 10, 0)
+
+    respuesta = responder_callback(con, cfg, f"modificar_historial:{entrada_id}")
+    assert "Analítica" in respuesta
+
+    respuesta = responder(con, cfg, "Analítica de sangre", ahora=ahora)
+    assert "Fecha actual: lunes 9 de noviembre." in respuesta
+
+    respuesta = responder(con, cfg, "no", ahora=ahora)
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert "Entrada del historial modificada:" in respuesta
+    assert entradas[0].descripcion == "Analítica de sangre"
+    assert entradas[0].fecha == date(2026, 11, 9)
+
+
+def test_boton_modificar_historial_permite_cambiar_la_fecha(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    ahora = datetime(2026, 11, 16, 10, 0)
+    responder_callback(con, cfg, f"modificar_historial:{entrada_id}")
+    responder(con, cfg, "no", ahora=ahora)
+
+    respuesta = responder(con, cfg, "15/11/2026", ahora=ahora)
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert "domingo 15 de noviembre: Analítica" in respuesta
+    assert entradas[0].fecha == date(2026, 11, 15)
+
+
+def test_boton_borrar_historial_pide_confirmacion_y_borra(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+
+    respuesta = responder_callback(con, cfg, f"borrar_historial:{entrada_id}")
+    assert "Vas a borrar esta entrada del historial:" in respuesta
+    assert respuesta.botones == [
+        [
+            {"text": "Sí", "callback_data": "confirmar_borrar_historial"},
+            {"text": "No", "callback_data": "cancelar_borrar_historial"},
+        ]
+    ]
+
+    respuesta = responder_callback(con, cfg, "confirmar_borrar_historial")
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert respuesta == "Entrada del historial borrada."
+    assert entradas == []
+
+
+def test_boton_borrar_historial_cancelar_no_borra(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    responder_callback(con, cfg, f"borrar_historial:{entrada_id}")
+
+    respuesta = responder_callback(con, cfg, "cancelar_borrar_historial")
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert respuesta == "No la he borrado. No se ha borrado nada."
+    assert len(entradas) == 1
+
+
+def test_boton_de_una_entrada_del_historial_que_ya_no_existe_avisa(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    respuesta = responder_callback(con, cfg, "borrar_historial:99")
+    con.close()
+
+    assert respuesta == "Ese botón ya no vale. Escribe /ayuda para ver lo que sé hacer."
+
+
+def test_borrar_medicacion_escribiendo_si_lo_borra(cfg):
+    con = guardar_medicamentos_de_ejemplo(cfg)
+    medicacion = db.listar_medicaciones(con)[0]
+    responder_callback(con, cfg, f"borrar_medicacion:{medicacion.id}")
+
+    respuesta = responder(con, cfg, "sí")
+    medicaciones = db.listar_medicaciones(con)
+    con.close()
+
+    assert respuesta == "Medicamento borrado."
+    assert len(medicaciones) == 1
+
+
+def test_borrar_historial_escribiendo_no_no_borra(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    responder_callback(con, cfg, f"borrar_historial:{entrada_id}")
+
+    respuesta = responder(con, cfg, "no")
+    entradas = db.listar_historial(con)
+    con.close()
+
+    assert respuesta == "No la he borrado. No se ha borrado nada."
+    assert len(entradas) == 1
