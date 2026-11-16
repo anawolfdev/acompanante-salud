@@ -1,7 +1,7 @@
 from datetime import date, datetime, time
 
 from acompanante import db
-from acompanante.modelos import Cita, Tarea, Tension
+from acompanante.modelos import Cita, EntradaHistorial, Medicacion, Tarea, Tension
 
 
 def test_guardar_y_leer_cita_con_preparacion(cfg):
@@ -235,3 +235,132 @@ def test_borrar_tension_la_quita_de_la_lista(cfg):
     leidas = db.listar_tensiones(con)
     assert len(leidas) == 1
     assert leidas[0].alta == 130
+
+
+def test_guardar_y_leer_medicacion(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    medicacion = Medicacion(
+        nombre="Paracetamol",
+        dosis="1 comprimido",
+        pauta="cada 8 horas",
+    )
+    nuevo_id = db.guardar_medicacion(con, medicacion)
+
+    leidas = db.listar_medicaciones(con)
+    assert len(leidas) == 1
+    assert leidas[0].id == nuevo_id
+    assert leidas[0].nombre == "Paracetamol"
+    assert leidas[0].dosis == "1 comprimido"
+    assert leidas[0].pauta == "cada 8 horas"
+    assert leidas[0].activa is True
+
+
+def test_medicacion_pausada_no_sale_entre_las_activas(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_medicacion(
+        con, Medicacion(nombre="Ibuprofeno", dosis="1 comprimido", pauta="cada 8 horas")
+    )
+    medicacion = db.listar_medicaciones(con)[0]
+    medicacion.activa = False
+    db.actualizar_medicacion(con, medicacion)
+
+    assert db.listar_medicaciones(con) == []
+    assert len(db.listar_medicaciones(con, solo_activas=False)) == 1
+
+
+def test_actualizar_medicacion_cambia_los_datos(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_medicacion(
+        con, Medicacion(nombre="Paracetamol", dosis="1 comprimido", pauta="cada 8 horas")
+    )
+    medicacion = db.listar_medicaciones(con)[0]
+    medicacion.dosis = "2 comprimidos"
+    medicacion.pauta = "cada 12 horas"
+    db.actualizar_medicacion(con, medicacion)
+
+    leida = db.obtener_medicacion(con, medicacion.id)
+    assert leida.dosis == "2 comprimidos"
+    assert leida.pauta == "cada 12 horas"
+
+
+def test_obtener_medicacion_que_no_existe_falla(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    try:
+        db.obtener_medicacion(con, 99)
+    except ValueError as error:
+        assert "99" in str(error)
+    else:
+        raise AssertionError("Tenía que fallar con un medicamento que no existe")
+    finally:
+        con.close()
+
+
+def test_borrar_medicacion_la_quita_de_la_lista(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    medicacion_id = db.guardar_medicacion(
+        con, Medicacion(nombre="Paracetamol", dosis="1 comprimido", pauta="cada 8 horas")
+    )
+
+    db.borrar_medicacion(con, medicacion_id)
+
+    assert db.listar_medicaciones(con) == []
+
+
+def test_historial_se_lista_de_lo_mas_reciente_a_lo_mas_antiguo(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Nota del médico", fecha=date(2026, 11, 10))
+    )
+    db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Vacuna", fecha=date(2026, 11, 8))
+    )
+
+    leidas = db.listar_historial(con)
+
+    assert [entrada.descripcion for entrada in leidas] == [
+        "Nota del médico",
+        "Analítica",
+        "Vacuna",
+    ]
+
+
+def test_actualizar_entrada_historial_cambia_descripcion_y_fecha(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+    entrada = db.obtener_entrada_historial(con, entrada_id)
+    entrada.descripcion = "Analítica de sangre"
+    entrada.fecha = date(2026, 11, 12)
+
+    db.actualizar_entrada_historial(con, entrada)
+
+    leida = db.obtener_entrada_historial(con, entrada_id)
+    assert leida.descripcion == "Analítica de sangre"
+    assert leida.fecha == date(2026, 11, 12)
+
+
+def test_obtener_entrada_historial_que_no_existe_falla(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    try:
+        db.obtener_entrada_historial(con, 99)
+    except ValueError as error:
+        assert "99" in str(error)
+    else:
+        raise AssertionError("Tenía que fallar con una entrada que no existe")
+    finally:
+        con.close()
+
+
+def test_borrar_entrada_historial_la_quita_de_la_lista(cfg):
+    con = db.conectar(cfg.ruta_bd)
+    entrada_id = db.guardar_entrada_historial(
+        con, EntradaHistorial(descripcion="Analítica", fecha=date(2026, 11, 9))
+    )
+
+    db.borrar_entrada_historial(con, entrada_id)
+
+    assert db.listar_historial(con) == []

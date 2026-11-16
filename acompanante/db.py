@@ -7,7 +7,7 @@ import sqlite3
 from datetime import date, datetime
 from pathlib import Path
 
-from acompanante.modelos import Cita, Tarea, Tension
+from acompanante.modelos import Cita, EntradaHistorial, Medicacion, Tarea, Tension
 from acompanante.textos import DIAS
 
 FORMATO = "%Y-%m-%d %H:%M"
@@ -54,6 +54,22 @@ CREATE TABLE IF NOT EXISTS tensiones (
     baja        INTEGER NOT NULL,           -- diastólica
     pulso       INTEGER,                    -- opcional
     nota        TEXT NOT NULL DEFAULT '',
+    creada_en   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS medicaciones (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    nombre      TEXT NOT NULL,
+    dosis       TEXT NOT NULL,
+    pauta       TEXT NOT NULL,
+    activa      INTEGER NOT NULL DEFAULT 1,
+    creada_en   TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS historial (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    descripcion TEXT NOT NULL,
+    fecha       TEXT NOT NULL,              -- 'AAAA-MM-DD'
     creada_en   TEXT NOT NULL
 );
 """
@@ -294,4 +310,128 @@ def listar_tensiones(con: sqlite3.Connection, limite: int = 10) -> list[Tension]
 
 def borrar_tension(con: sqlite3.Connection, tension_id: int) -> None:
     con.execute("DELETE FROM tensiones WHERE id = ?", (tension_id,))
+    con.commit()
+
+
+def _fila_a_medicacion(fila: sqlite3.Row) -> Medicacion:
+    return Medicacion(
+        id=fila["id"],
+        nombre=fila["nombre"],
+        dosis=fila["dosis"],
+        pauta=fila["pauta"],
+        activa=bool(fila["activa"]),
+    )
+
+
+def guardar_medicacion(con: sqlite3.Connection, medicacion: Medicacion) -> int:
+    cur = con.execute(
+        "INSERT INTO medicaciones (nombre, dosis, pauta, activa, creada_en)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (
+            medicacion.nombre,
+            medicacion.dosis,
+            medicacion.pauta,
+            1 if medicacion.activa else 0,
+            datetime.now().strftime(FORMATO),
+        ),
+    )
+    con.commit()
+    medicacion.id = cur.lastrowid
+    return medicacion.id
+
+
+def obtener_medicacion(con: sqlite3.Connection, medicacion_id: int) -> Medicacion:
+    fila = con.execute(
+        "SELECT * FROM medicaciones WHERE id = ?", (medicacion_id,)
+    ).fetchone()
+    if fila is None:
+        raise ValueError(f"No hay ningún medicamento con el número {medicacion_id}")
+    return _fila_a_medicacion(fila)
+
+
+def listar_medicaciones(
+    con: sqlite3.Connection, solo_activas: bool = True
+) -> list[Medicacion]:
+    if solo_activas:
+        filas = con.execute(
+            "SELECT * FROM medicaciones WHERE activa = 1 ORDER BY id"
+        ).fetchall()
+    else:
+        filas = con.execute("SELECT * FROM medicaciones ORDER BY id").fetchall()
+    return [_fila_a_medicacion(fila) for fila in filas]
+
+
+def actualizar_medicacion(con: sqlite3.Connection, medicacion: Medicacion) -> None:
+    con.execute(
+        "UPDATE medicaciones SET nombre = ?, dosis = ?, pauta = ?, activa = ?"
+        " WHERE id = ?",
+        (
+            medicacion.nombre,
+            medicacion.dosis,
+            medicacion.pauta,
+            1 if medicacion.activa else 0,
+            medicacion.id,
+        ),
+    )
+    con.commit()
+
+
+def borrar_medicacion(con: sqlite3.Connection, medicacion_id: int) -> None:
+    con.execute("DELETE FROM medicaciones WHERE id = ?", (medicacion_id,))
+    con.commit()
+
+
+def _fila_a_entrada_historial(fila: sqlite3.Row) -> EntradaHistorial:
+    return EntradaHistorial(
+        id=fila["id"],
+        descripcion=fila["descripcion"],
+        fecha=datetime.strptime(fila["fecha"], "%Y-%m-%d").date(),
+    )
+
+
+def guardar_entrada_historial(con: sqlite3.Connection, entrada: EntradaHistorial) -> int:
+    cur = con.execute(
+        "INSERT INTO historial (descripcion, fecha, creada_en) VALUES (?, ?, ?)",
+        (
+            entrada.descripcion,
+            entrada.fecha.strftime("%Y-%m-%d"),
+            datetime.now().strftime(FORMATO),
+        ),
+    )
+    con.commit()
+    entrada.id = cur.lastrowid
+    return entrada.id
+
+
+def obtener_entrada_historial(
+    con: sqlite3.Connection, entrada_id: int
+) -> EntradaHistorial:
+    fila = con.execute(
+        "SELECT * FROM historial WHERE id = ?", (entrada_id,)
+    ).fetchone()
+    if fila is None:
+        raise ValueError(f"No hay ninguna entrada del historial con el número {entrada_id}")
+    return _fila_a_entrada_historial(fila)
+
+
+def listar_historial(con: sqlite3.Connection) -> list[EntradaHistorial]:
+    """Todas las entradas, de la más reciente a la más antigua."""
+    filas = con.execute(
+        "SELECT * FROM historial ORDER BY fecha DESC, id DESC"
+    ).fetchall()
+    return [_fila_a_entrada_historial(fila) for fila in filas]
+
+
+def actualizar_entrada_historial(
+    con: sqlite3.Connection, entrada: EntradaHistorial
+) -> None:
+    con.execute(
+        "UPDATE historial SET descripcion = ?, fecha = ? WHERE id = ?",
+        (entrada.descripcion, entrada.fecha.strftime("%Y-%m-%d"), entrada.id),
+    )
+    con.commit()
+
+
+def borrar_entrada_historial(con: sqlite3.Connection, entrada_id: int) -> None:
+    con.execute("DELETE FROM historial WHERE id = ?", (entrada_id,))
     con.commit()

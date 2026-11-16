@@ -264,7 +264,9 @@ def registrar_comandos_telegram(token: str, abrir=None) -> bool:
         {"command": "anadir", "description": "Apuntar una cita nueva"},
         {"command": "citas", "description": "Ver tus citas"},
         {"command": "tension", "description": "Apuntar una toma de tensión"},
-        {"command": "historial", "description": "Ver tus últimas tomas de tensión"},
+        {"command": "tensiones", "description": "Ver tus últimas tomas de tensión"},
+        {"command": "medicacion", "description": "Ver tus medicamentos"},
+        {"command": "historial", "description": "Ver tu historial de salud"},
     ]
     if abrir is None:
         abrir = urllib.request.urlopen

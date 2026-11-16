@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 # Tipos de cita y cómo se nombran en los mensajes.
 TIPOS = {
@@ -77,4 +77,46 @@ class Tension:
         if self.alta < self.baja:
             raise ValueError(
                 "La tensión de alta no puede ser menor que la de baja. Revisa los números"
+            )
+
+
+@dataclass
+class Medicacion:
+    """Un medicamento que la persona toma. Solo se guarda y se enseña."""
+
+    nombre: str
+    dosis: str
+    pauta: str
+    activa: bool = True
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        ejemplos = {
+            "nombre": "Paracetamol",
+            "dosis": "1 comprimido",
+            "pauta": "cada 8 horas",
+        }
+        for nombre, valor in (
+            ("nombre", self.nombre),
+            ("dosis", self.dosis),
+            ("pauta", self.pauta),
+        ):
+            if not valor.strip():
+                raise ValueError(
+                    f"El medicamento necesita {nombre}, por ejemplo: {ejemplos[nombre]}"
+                )
+
+
+@dataclass
+class EntradaHistorial:
+    """Una entrada libre del registro general de salud."""
+
+    descripcion: str
+    fecha: date
+    id: int | None = None
+
+    def __post_init__(self) -> None:
+        if not self.descripcion.strip():
+            raise ValueError(
+                "La entrada necesita una descripción, por ejemplo: Analítica de sangre"
             )
