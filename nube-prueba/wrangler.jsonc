@@ -1,0 +1,19 @@
+{
+  // Prueba 18A: Worker que lee citas de mentira de D1 y avisa por Telegram.
+  // Los secretos (TELEGRAM_TOKEN, TELEGRAM_CHAT_ID) NUNCA van aquí:
+  // se guardan en el panel de Cloudflare, en Variables y secretos.
+  // OJO: el cron NO se activa desde este archivo a propósito. Así, desplegar
+  // el repo nunca reactiva los envíos sin aviso. El cron se añade a mano en
+  // el panel (Eventos de activación) solo para la prueba, y se borra al
+  // terminar. Está explicado en el README de esta carpeta.
+  "name": "acompanante-prueba",
+  "main": "worker.js",
+  "compatibility_date": "2026-11-17",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "salud-prueba",
+      "database_id": "e5967e59-35e1-4ffd-ab7c-a2dd42bccb9f"
+    }
+  ]
+}

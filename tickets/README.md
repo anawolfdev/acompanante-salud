@@ -22,5 +22,6 @@ Para tener una demo que enseñar bastan **ACS-001, ACS-002 y ACS-003** (unas 2 h
 | [ACS-014](ACS-014-proximas-y-cambiar.md) | Quitar /proximas, cambiar y añadir citas desde el bot | 1 h 30 min |
 | [ACS-015](ACS-015-arranque-automatico.md) | Que el bot arranque solo en el Mac con launchd | 45 min |
 | [ACS-017](ACS-017-medicacion-e-historial.md) | Medicamentos e historial de salud | 2 h |
+| [ACS-018A](ACS-018A-prueba-nube.md) | prueba de conexión nube-Telegram con el Mac en reposo | — |
 
 Tiempo total aproximado: unas 18 horas. Con modelos gratis puede tardar algo más: es normal.
